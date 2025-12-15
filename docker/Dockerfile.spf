@@ -1,0 +1,12 @@
+FROM eclipse-temurin:8-jdk
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    git \
+    ant \
+    python3 \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+CMD ["bash"]

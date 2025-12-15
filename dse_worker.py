@@ -18,13 +18,13 @@ class DSEWorker:
         self.inflight = cfg.inflight_dir
         self.out_tmp_root = cfg.generated_dir
         self.logs = cfg.logs_dir
-        self.wrapper = cfg.wrapper_path
+        self.engine = cfg.engine_path
         self.inflight.mkdir(parents=True, exist_ok=True)
         self.logs.mkdir(parents=True, exist_ok=True)
 
     def run(self):
         wid = self.worker_id
-        print(f"[DSE-{wid}] backend={self.cfg.dse_backend} wrapper={self.wrapper}")
+        print(f"[DSE-{wid}] backend={self.cfg.dse_backend} engine={self.engine}")
         while True:
             seed_claimed = claim_one_seed(self.queue, self.inflight, self.worker_id)
             if seed_claimed is None:
@@ -36,7 +36,7 @@ class DSEWorker:
             out_tmp.mkdir(parents=True, exist_ok=True)
 
             log_path = self.logs / f"dse_w{wid}_{seed_claimed.name}.log"
-            cmd = [os.environ.get("PYTHON", "python3"), str(self.wrapper), str(seed_claimed), str(out_tmp)]
+            cmd = [os.environ.get("PYTHON", "python3"), str(self.engine), str(seed_claimed), str(out_tmp)]
             print(f"[DSE-{wid}] running:", " ".join(cmd))
             with log_path.open("w", encoding="utf-8", errors="replace") as lf:
                 rc = subprocess.call(cmd, stdout=lf, stderr=subprocess.STDOUT)

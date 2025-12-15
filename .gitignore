@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+
+work*/
+third_party/
+scripts/spf_env.sh

@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
-import sys, subprocess
-from datetime import datetime
+import sys
+import subprocess
 from pathlib import Path
+
+"""
+Contract:
+  python swat_engine.py <seed_file> <out_dir>
+"""
+
 
 def main():
     seed = Path(sys.argv[1]).resolve()
     out_dir = Path(sys.argv[2]).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(str(out_dir / datetime.now().strftime('%Y-%m-%d_%H:%M:%S')), "w") as f:
-      f.write(str(seed))
+    cmd = ["/path/to/run_swat_seed2inputs.sh", str(seed), str(out_dir)]
+    return subprocess.call(cmd)
 
 
 if __name__ == "__main__":

@@ -20,9 +20,9 @@ class Config:
     max_import_per_seed: int = 64           # seed 하나당 import 상한
 
     # DSE
-    dummy_wrapper: Path = Path("wrappers/dummy_wrapper.py")
-    spf_wrapper: Path = Path("wrappers/spf_wrapper.py")
-    swat_wrapper: Path = Path("wrappers/swat_wrapper.py")
+    dummy_engine: Path = Path("engines/dummy_engine.py")
+    spf_engine: Path = Path("engines/spf_engine.py")
+    swat_engine: Path = Path("engines/swat_engine.py")
 
     # DSE worker behavior
     dse_backend: str = "dummy"
@@ -53,10 +53,10 @@ class Config:
         return self.work_dir / "generated"
 
     @property
-    def wrapper_path(self) -> Path:
+    def engine_path(self) -> Path:
         b = (self.dse_backend or "").lower()
         if b == "spf":
-            return self.spf_wrapper
+            return self.spf_engine
         if b == "swat":
-            return self.swat_wrapper
-        return self.dummy_wrapper
+            return self.swat_engine
+        return self.dummy_engine
