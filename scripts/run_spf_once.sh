@@ -156,6 +156,11 @@ PY
 
 cat > "$WORK_DIR/SpfHarness.java" <<JAVA
 public class SpfHarness {
+  static {
+    System.setProperty("file.encoding", "UTF-8");
+    System.setProperty("sun.jnu.encoding", "UTF-8");
+  }
+
   private static final byte[] SEED = new byte[] {
 $JAVA_SEED_BYTES  };
 
@@ -175,6 +180,11 @@ target=@TARGET@
 classpath=@CLASSPATH@
 
 target.args=@SEED@
+
+# JPF's modeled JRE can miss encoding-related sysprops; defaultCharset() then throws
+# "IllegalArgumentException: Null charset name" in common libraries (e.g. commons-io).
+vm.sysprop.file.encoding=UTF-8
+vm.sysprop.sun.jnu.encoding=UTF-8
 
 $LISTENER_LINE
 symbolic.method=SpfHarness.run(sym)
