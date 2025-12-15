@@ -1,6 +1,7 @@
 import os
 import shutil
 import hashlib
+import random
 from pathlib import Path
 from typing import List, Set, Optional
 
@@ -65,3 +66,66 @@ def build_dir_fingerprint_index(dirpath: Path, limit_files: int = 20000) -> Set[
         except Exception:
             continue
     return fps
+
+
+def claim_one_seed(queue: Path, inflight: Path, worker_id: int) -> Optional[Path]:
+    """
+    Atomically claim the oldest seed file in queue by moving it into inflight.
+    Returns the claimed path (now under inflight) or None if nothing to claim.
+    """
+    items = safe_list_files(queue)
+    if not items:
+        return None
+    items.sort(key=lambda p: p.stat().st_mtime)  # oldest first
+    for p in items:
+        claimed = inflight / f"{p.name}.w{worker_id}.pid{os.getpid()}"
+        try:
+            os.replace(p, claimed)
+            return claimed
+        except (FileNotFoundError, OSError):
+            continue
+    return None
+
+
+def import_generated(out_tmp: Path, corpus: Path,
+                     min_bytes: int, max_bytes: int, max_import: int) -> int:
+    """
+    Import generated inputs from out_tmp into corpus with size caps and fast dedup.
+    Returns number of imported files.
+    """
+    imported = 0
+    corpus_fp = build_dir_fingerprint_index(corpus, limit_files=20000)
+    batch_fp: Set[str] = set()
+
+    files = safe_list_files(out_tmp)
+    files.sort(key=lambda p: p.stat().st_size)
+    for f in files:
+        sz = f.stat().st_size
+        if sz < min_bytes or sz > max_bytes:
+            continue
+        fp = fast_fingerprint(f)
+        if fp in batch_fp or fp in corpus_fp:
+            continue
+        batch_fp.add(fp)
+
+        name = f"gen_{fp[:16]}_{sz}"
+        dst = corpus / name
+        if dst.exists():
+            continue
+
+        atomic_copy_to_dir(f, corpus, name)
+        corpus_fp.add(fp)
+        imported += 1
+        if imported >= max_import:
+            break
+    return imported
+
+
+def pick_candidates(files: List[Path], head_count: int) -> List[Path]:
+    """
+    Take newest head_count files and shuffle the rest for variety.
+    """
+    head = files[:min(len(files), head_count)]
+    rest = files[min(len(files), head_count):]
+    random.shuffle(rest)
+    return head + rest

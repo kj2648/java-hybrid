@@ -34,3 +34,29 @@ class Config:
     # reload_sec: int = 1
     # artifact_prefix: Optional[str] = None
     # extra_fuzzer_args: Optional[List[str]] = None
+
+    # -------- Derived paths / helpers (read-only) --------
+    @property
+    def queue_dir(self) -> Path:
+        return self.work_dir / "queue"
+
+    @property
+    def inflight_dir(self) -> Path:
+        return self.queue_dir / ".inflight"
+
+    @property
+    def logs_dir(self) -> Path:
+        return self.work_dir / "logs"
+
+    @property
+    def generated_dir(self) -> Path:
+        return self.work_dir / "generated"
+
+    @property
+    def wrapper_path(self) -> Path:
+        b = (self.dse_backend or "").lower()
+        if b == "spf":
+            return self.spf_wrapper
+        if b == "swat":
+            return self.swat_wrapper
+        return self.dummy_wrapper
