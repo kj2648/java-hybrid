@@ -23,6 +23,7 @@ class Config:
     dummy_engine: Path = Path("engines/dummy_engine.py")
     spf_engine: Path = Path("engines/spf_engine.py")
     swat_engine: Path = Path("engines/swat_engine.py")
+    fuzzer_path: Optional[Path] = None
 
     # DSE worker behavior
     dse_backend: str = "dummy"

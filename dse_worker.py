@@ -36,7 +36,12 @@ class DSEWorker:
             out_tmp.mkdir(parents=True, exist_ok=True)
 
             log_path = self.logs / f"dse_w{wid}_{seed_claimed.name}.log"
-            cmd = [os.environ.get("PYTHON", "python3"), str(self.engine), str(seed_claimed), str(out_tmp)]
+            cmd = [os.environ.get("PYTHON", "python3"), str(self.engine)]
+            if (self.cfg.dse_backend or "").lower() == "spf":
+                if self.cfg.fuzzer_path is None:
+                    raise SystemExit("[spf] missing fuzzer path in config (pass --fuzzer-path via CLI)")
+                cmd += ["--fuzzer-path", str(self.cfg.fuzzer_path), "--work-dir", str(self.cfg.work_dir)]
+            cmd += [str(seed_claimed), str(out_tmp)]
             print(f"[DSE-{wid}] running:", " ".join(cmd))
             with log_path.open("w", encoding="utf-8", errors="replace") as lf:
                 rc = subprocess.call(cmd, stdout=lf, stderr=subprocess.STDOUT)

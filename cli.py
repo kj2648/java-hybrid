@@ -2,6 +2,7 @@ import sys
 import time
 import argparse
 import subprocess
+import os
 from pathlib import Path
 
 from config import Config
@@ -15,6 +16,7 @@ def parse_args():
     p.add_argument("--work-dir", required=True, help="Work directory root")
     p.add_argument("--dse-backend", choices=["dummy", "spf", "swat"], required=True, help="DSE backend engine")
     p.add_argument("--dse-workers", type=int, default=Config.dse_workers, help="Number of DSE workers")
+    p.add_argument("--fuzzer-path", default="", help="(spf backend) Jazzer-style OSS-Fuzz launcher path")
 
     # role selection
     p.add_argument("role", choices=["watcher", "dse", "all"], help="Which role to run")
@@ -27,12 +29,23 @@ def build_cfg(args) -> Config:
         work_dir=Path(args.work_dir).resolve(),
         dse_backend=args.dse_backend,
         dse_workers=args.dse_workers,
+        fuzzer_path=(Path(os.path.expanduser(args.fuzzer_path)).resolve() if args.fuzzer_path else None),
     )
+
+def _require_spf_fuzzer_path(cfg: Config):
+    if (cfg.dse_backend or "").lower() != "spf":
+        return
+    if cfg.fuzzer_path is None:
+        raise SystemExit("[spf] missing `--fuzzer-path` (required when --dse-backend=spf)")
+    if not cfg.fuzzer_path.is_file():
+        raise SystemExit(f"[spf] fuzzer path not found: {cfg.fuzzer_path}")
 
 def spawn_all(args):
     """
     spawn watcher + N workers
     """
+    cfg = build_cfg(args)
+    _require_spf_fuzzer_path(cfg)
     base = [
         sys.executable, "-m", "cli",
         "--corpus", args.corpus,
@@ -40,6 +53,8 @@ def spawn_all(args):
         "--dse-backend", args.dse_backend,
         "--dse-workers", str(args.dse_workers),
     ]
+    if args.fuzzer_path:
+        base += ["--fuzzer-path", args.fuzzer_path]
 
     procs = []
     procs.append(subprocess.Popen(base + ["watcher"]))
@@ -67,6 +82,9 @@ def spawn_all(args):
 def main():
     args = parse_args()
     cfg = build_cfg(args)
+
+    if args.role in {"dse", "all"}:
+        _require_spf_fuzzer_path(cfg)
 
     if args.role == "watcher":
         watcher_enqueue_seeds(cfg)

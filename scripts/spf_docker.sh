@@ -13,8 +13,8 @@ Usage:
   scripts/spf_docker.sh build
   scripts/spf_docker.sh shell
   scripts/spf_docker.sh setup
-  scripts/spf_docker.sh run --corpus /path/to/corpus [--backend spf] [--workers N]
-  scripts/spf_docker.sh run-once --launcher /path/to/fuzzer --seed /path/to/seedfile [--out work/spf_out]
+  scripts/spf_docker.sh run --corpus /path/to/corpus [--backend spf] [--workers N] [--fuzzer-path /path/to/FuzzerLauncher]
+  scripts/spf_docker.sh run-once --fuzzer-path /path/to/FuzzerLauncher --seed /path/to/seedfile [--out work/spf_out]
 
 Notes:
   - The repo is mounted into /workspace.
@@ -61,6 +61,7 @@ case "${1:-}" in
     CORPUS=""
     BACKEND="spf"
     WORKERS="1"
+    FUZZER_PATH=""
 
     while [[ $# -gt 0 ]]; do
       case "$1" in
@@ -74,6 +75,10 @@ case "${1:-}" in
           ;;
         --workers)
           WORKERS="$2"
+          shift 2
+          ;;
+        --fuzzer-path)
+          FUZZER_PATH="$2"
           shift 2
           ;;
         -h|--help)
@@ -90,6 +95,11 @@ case "${1:-}" in
 
     if [[ -z "$CORPUS" ]]; then
       echo "--corpus is required" >&2
+      usage
+      exit 2
+    fi
+    if [[ "$BACKEND" == "spf" && -z "$FUZZER_PATH" ]]; then
+      echo "--fuzzer-path is required when --backend=spf" >&2
       usage
       exit 2
     fi
@@ -112,7 +122,7 @@ case "${1:-}" in
       "$IMAGE_NAME" \
       bash -lc "\
       if [[ -f scripts/spf_env.sh ]]; then source scripts/spf_env.sh; fi; \
-      python3 -m cli --corpus /mnt/corpus --dse-backend \"$BACKEND\" --dse-workers \"$WORKERS\" all \
+      python3 -m cli --corpus /mnt/corpus --dse-backend \"$BACKEND\" --dse-workers \"$WORKERS\" ${FUZZER_PATH:+--fuzzer-path \"$FUZZER_PATH\"} all \
     "
     ;;
   run-once)
@@ -123,7 +133,7 @@ case "${1:-}" in
 
     while [[ $# -gt 0 ]]; do
       case "$1" in
-        --launcher)
+        --fuzzer-path|--launcher)
           LAUNCHER="$2"; shift 2;;
         --seed)
           SEED="$2"; shift 2;;
@@ -142,7 +152,7 @@ case "${1:-}" in
     done
 
     if [[ -z "$LAUNCHER" ]]; then
-      echo "--launcher is required" >&2
+      echo "--fuzzer-path is required" >&2
       usage
       exit 2
     fi
