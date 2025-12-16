@@ -29,6 +29,7 @@ class Config:
     dse_backend: str = "dummy"
     dse_workers: int = 1
     dse_poll_interval: int = 3  # seconds
+    dse_timeout_sec: int = 60   # kill hung engine runs
 
     # # fuzzer args if you want to run fuzzer role
     # fuzzer_bin: Optional[Path] = None

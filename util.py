@@ -2,6 +2,7 @@ import os
 import shutil
 import hashlib
 import random
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Set, Optional
 
@@ -87,37 +88,87 @@ def claim_one_seed(queue: Path, inflight: Path, worker_id: int) -> Optional[Path
     return None
 
 
+@dataclass(frozen=True)
+class ImportStats:
+    scanned: int
+    eligible: int
+    imported: int
+    skipped_too_small: int
+    skipped_too_large: int
+    skipped_dup_batch: int
+    skipped_dup_corpus: int
+    skipped_dst_exists: int
+    errors: int
+
+
 def import_generated(out_tmp: Path, corpus: Path,
-                     min_bytes: int, max_bytes: int, max_import: int) -> int:
+                     min_bytes: int, max_bytes: int, max_import: int, *, return_stats: bool = False):
     """
     Import generated inputs from out_tmp into corpus with size caps and fast dedup.
     Returns number of imported files.
     """
     imported = 0
+    scanned = 0
+    eligible = 0
+    skipped_too_small = 0
+    skipped_too_large = 0
+    skipped_dup_batch = 0
+    skipped_dup_corpus = 0
+    skipped_dst_exists = 0
+    errors = 0
     corpus_fp = build_dir_fingerprint_index(corpus, limit_files=20000)
     batch_fp: Set[str] = set()
 
     files = safe_list_files(out_tmp)
     files.sort(key=lambda p: p.stat().st_size)
     for f in files:
-        sz = f.stat().st_size
-        if sz < min_bytes or sz > max_bytes:
-            continue
-        fp = fast_fingerprint(f)
-        if fp in batch_fp or fp in corpus_fp:
-            continue
-        batch_fp.add(fp)
+        scanned += 1
+        try:
+            sz = f.stat().st_size
+            if sz < min_bytes:
+                skipped_too_small += 1
+                continue
+            if sz > max_bytes:
+                skipped_too_large += 1
+                continue
+            eligible += 1
 
-        name = f"gen_{fp[:16]}_{sz}"
-        dst = corpus / name
-        if dst.exists():
+            fp = fast_fingerprint(f)
+            if fp in batch_fp:
+                skipped_dup_batch += 1
+                continue
+            if fp in corpus_fp:
+                skipped_dup_corpus += 1
+                continue
+            batch_fp.add(fp)
+
+            name = f"gen_{fp[:16]}_{sz}"
+            dst = corpus / name
+            if dst.exists():
+                skipped_dst_exists += 1
+                continue
+
+            atomic_copy_to_dir(f, corpus, name)
+            corpus_fp.add(fp)
+            imported += 1
+            if imported >= max_import:
+                break
+        except Exception:
+            errors += 1
             continue
 
-        atomic_copy_to_dir(f, corpus, name)
-        corpus_fp.add(fp)
-        imported += 1
-        if imported >= max_import:
-            break
+    if return_stats:
+        return imported, ImportStats(
+            scanned=scanned,
+            eligible=eligible,
+            imported=imported,
+            skipped_too_small=skipped_too_small,
+            skipped_too_large=skipped_too_large,
+            skipped_dup_batch=skipped_dup_batch,
+            skipped_dup_corpus=skipped_dup_corpus,
+            skipped_dst_exists=skipped_dst_exists,
+            errors=errors,
+        )
     return imported
 
 

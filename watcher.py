@@ -3,6 +3,7 @@ from pathlib import Path
 
 from config import Config
 from util import ensure_dirs, safe_list_files, sha256_file, atomic_copy_to_dir, pick_candidates
+from logutil import make_file_logger
 
 
 class Watcher:
@@ -13,14 +14,14 @@ class Watcher:
         self.queue: Path = cfg.queue_dir
         self.logs: Path = cfg.logs_dir
         self.log_path: Path = self.logs / "watcher.log"
+        self.logger = make_file_logger(self.log_path, logger_name="watcher", append=True)
         self.last_count = len(safe_list_files(self.corpus))
         self.last_change = time.time()
         self.seen_hashes = set()
 
     def log(self, msg: str):
         print("[Watcher]", msg)
-        with self.log_path.open("a", encoding="utf-8") as f:
-            f.write(msg + "\n")
+        self.logger.info("%s", msg)
 
     def enqueue_from_plateau(self, files: list[Path]):
         enq = 0
@@ -64,4 +65,3 @@ class Watcher:
 
 def watcher_enqueue_seeds(cfg: Config):
     Watcher(cfg).run()
-

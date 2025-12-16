@@ -30,7 +30,6 @@ class SpfRunTuning:
     seed_limit: int
     symbolic_arrays: str
     use_symbolic_listener: bool
-    time_budget_sec: int
 
     @staticmethod
     def from_env() -> "SpfRunTuning":
@@ -38,7 +37,6 @@ class SpfRunTuning:
             seed_limit=int(os.environ.get("SPF_SEED_MAX_BYTES", "4096")),
             symbolic_arrays=os.environ.get("SPF_SYMBOLIC_ARRAYS", "true"),
             use_symbolic_listener=os.environ.get("SPF_USE_SYMBOLIC_LISTENER", "0") == "1",
-            time_budget_sec=int(os.environ.get("SPF_TIME_BUDGET", "30")),
         )
 
 
@@ -243,7 +241,7 @@ class SpfEngine:
             jpf_file = self._write_run_jpf(run_dir, prepared, seed_b64, out_dir)
             cmd, env = self._build_run_command(prepared, jpf_file)
             log_path = self._log_path(out_dir, seed_tag)
-            self._run_jpf(cmd=cmd, env=env, cwd=run_dir, log_path=log_path, timeout_sec=self.tuning.time_budget_sec)
+            self._run_jpf(cmd=cmd, env=env, cwd=run_dir, log_path=log_path)
 
     @staticmethod
     def _encode_seed(seed: Path, seed_limit: int) -> tuple[str, str]:
@@ -315,13 +313,10 @@ class SpfEngine:
         return log_dir / f"spf_{int(time.time()*1000)}_{seed_tag}.log"
 
     @staticmethod
-    def _run_jpf(*, cmd: list[str], env: dict[str, str], cwd: Path, log_path: Path, timeout_sec: int):
+    def _run_jpf(*, cmd: list[str], env: dict[str, str], cwd: Path, log_path: Path):
         with log_path.open("wb") as fp:
             p = subprocess.Popen(cmd, cwd=cwd, stdout=fp, stderr=subprocess.STDOUT, env=env)
-            try:
-                p.wait(timeout=timeout_sec)
-            except subprocess.TimeoutExpired:
-                p.kill()
+            p.wait()
 
 def main() -> int:
     ap = argparse.ArgumentParser("spf_engine: run SPF for a Jazzer-style fuzzer target")
