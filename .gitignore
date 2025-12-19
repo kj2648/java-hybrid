@@ -4,3 +4,4 @@ __pycache__/
 work*/
 third_party/
 scripts/spf_env.sh
+.vendor_tmp/

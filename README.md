@@ -105,6 +105,11 @@ Engines are strictly “one seed per invocation”.
 
 The SPF engine (`engines/spf_engine.py`) parses the Jazzer launcher to obtain classpath/target class, generates + compiles a harness into a cache directory, then runs JPF.
 
+- If you want to use Team-Atlanta's `atl-jazzer` fork as the Jazzer binary, you can fetch just that subtree and generate a compatible launcher script (recommended: keep the launcher under this repo so `$this_dir`-relative paths work):
+  - Fetch: `scripts/fetch_atl_jazzer.sh`
+  - Generate launcher: `python3 scripts/make_jazzer_launcher.py --out work/FuzzerLauncher --cp '<classpath>' --target-class '<FuzzTargetClass>'`
+  - Then run `python3 -m cli ... --dse-backend spf --fuzzer-path work/FuzzerLauncher all`
+
 - Local setup: `scripts/setup_spf.sh` (requires network for git clone)
 - Docker workflow: see `docker/README.md`
 - Useful env vars:
