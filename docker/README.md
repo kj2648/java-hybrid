@@ -23,7 +23,7 @@ Edit `scripts/spf_env.sh`:
 
 ## Run orchestrator (inside container)
 
-`scripts/spf_docker.sh run --corpus /path/to/corpus --workers 2`
+`scripts/spf_docker.sh run --corpus /path/to/corpus --workers 2 --fuzzer-path /path/to/FuzzerLauncher --mode atl`
 
 ## Run SPF once (example)
 

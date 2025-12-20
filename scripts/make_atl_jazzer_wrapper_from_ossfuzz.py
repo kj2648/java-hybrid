@@ -48,7 +48,10 @@ def main() -> int:
     ap.add_argument(
         "--agent-jar",
         default="",
-        help="Path to jazzer_agent_deploy.jar (or equivalent). Defaults to <ossfuzz_out>/jazzer_agent_deploy.jar",
+        help=(
+            "Path to atl-jazzer's jazzer_standalone_deploy.jar (used by the native launcher). "
+            "Defaults to <atl_driver_dir>/jazzer.runfiles/_main/src/main/java/com/code_intelligence/jazzer/jazzer_standalone_deploy.jar"
+        ),
     )
     ap.add_argument(
         "--java-home",
@@ -60,6 +63,11 @@ def main() -> int:
         default="",
         help="LD_LIBRARY_PATH to use. Defaults to <ossfuzz_out> (same as OSS-Fuzz launcher).",
     )
+    ap.add_argument("--zmq-router-addr", default="", help="Set ATLJAZZER_ZMQ_ROUTER_ADDR (enables OOFMutate)")
+    ap.add_argument("--zmq-harness-id", default="", help="Set ATLJAZZER_ZMQ_HARNESS_ID (enables OOFMutate)")
+    ap.add_argument("--zmq-shm-name", default="", help="Optional ATLJAZZER_ZMQ_SHM_NAME (must match router)")
+    ap.add_argument("--zmq-dealer-id", default="", help="Optional ATLJAZZER_ZMQ_DEALER_ID")
+    ap.add_argument("--zmq-dealer-log", default="", help="Optional ATLJAZZER_ZMQ_DEALER_LOG")
     args = ap.parse_args()
 
     oss_launcher = Path(os.path.expanduser(args.ossfuzz_launcher)).resolve()
@@ -76,12 +84,25 @@ def main() -> int:
     if not atl_driver_p.exists():
         raise SystemExit(f"atl-jazzer driver not found: {atl_driver_p}\nHint: build atl-jazzer: cd third_party/atl-jazzer && bazelisk build //:jazzer")
 
+    # atl-jazzer's native launcher needs jazzer_standalone_deploy.jar to bootstrap the Java side.
+    # If we point --agent_path at the OSS-Fuzz jazzer_agent_deploy.jar, we may accidentally run the
+    # *non-atl* driver (no OOFMutate Dealer), which makes ZMQ integration appear "dead".
+    atl_runfiles = atl_driver_p.parent / "jazzer.runfiles"
+    atl_standalone_jar_default = (
+        atl_runfiles / "_main" / "src" / "main" / "java" / "com" / "code_intelligence" / "jazzer" / "jazzer_standalone_deploy.jar"
+    )
+
     agent_jar = args.agent_jar
     if not agent_jar:
-        agent_jar = str(oss_out_dir / "jazzer_agent_deploy.jar")
+        agent_jar = str(atl_standalone_jar_default)
     agent_jar_p = _abspath_no_symlink(Path(agent_jar))
     if not agent_jar_p.is_file():
-        raise SystemExit(f"agent jar not found: {agent_jar_p}")
+        raise SystemExit(
+            "atl-jazzer standalone jar not found (needed for atl mode):\n"
+            f"  expected: {atl_standalone_jar_default}\n"
+            f"  got:      {agent_jar_p}\n"
+            "Hint: build atl-jazzer: cd third_party/atl-jazzer && bazelisk build //:jazzer"
+        )
 
     java_home = args.java_home
     if not java_home:
@@ -104,7 +125,7 @@ def main() -> int:
         "# Auto-generated wrapper to run an OSS-Fuzz Jazzer target using atl-jazzer binaries.",
         f'# Source launcher: "{oss_launcher}"',
         f'# atl-jazzer driver: "{atl_driver_p}"',
-        f'# agent jar: "{agent_jar_p}"',
+        f'# atl-jazzer standalone jar: "{agent_jar_p}"',
         "",
         "if [[ \"$@\" =~ (^|[[:space:]])-runs=[0-9]+($|[[:space:]]) ]]; then",
         "  mem_settings='-Xmx1900m:-Xss900k'",
@@ -117,6 +138,20 @@ def main() -> int:
         lines += [f'export JAVA_HOME="{java_home}"', 'export PATH="$JAVA_HOME/bin:$PATH"']
     if ld_library_path:
         lines += [f'export LD_LIBRARY_PATH="{ld_library_path}"']
+
+    if args.zmq_router_addr or args.zmq_harness_id:
+        if not (args.zmq_router_addr and args.zmq_harness_id):
+            raise SystemExit("--zmq-router-addr and --zmq-harness-id must be provided together")
+        lines += [
+            f'export ATLJAZZER_ZMQ_ROUTER_ADDR="${{ATLJAZZER_ZMQ_ROUTER_ADDR:-{args.zmq_router_addr}}}"',
+            f'export ATLJAZZER_ZMQ_HARNESS_ID="${{ATLJAZZER_ZMQ_HARNESS_ID:-{args.zmq_harness_id}}}"',
+        ]
+        if args.zmq_shm_name:
+            lines.append(f'export ATLJAZZER_ZMQ_SHM_NAME="${{ATLJAZZER_ZMQ_SHM_NAME:-{args.zmq_shm_name}}}"')
+        if args.zmq_dealer_id:
+            lines.append(f'export ATLJAZZER_ZMQ_DEALER_ID="${{ATLJAZZER_ZMQ_DEALER_ID:-{args.zmq_dealer_id}}}"')
+        if args.zmq_dealer_log:
+            lines.append(f'export ATLJAZZER_ZMQ_DEALER_LOG="${{ATLJAZZER_ZMQ_DEALER_LOG:-{args.zmq_dealer_log}}}"')
 
     lines += [
         "",

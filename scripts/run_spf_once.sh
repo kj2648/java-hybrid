@@ -4,7 +4,7 @@ set -euo pipefail
 # Back-compat wrapper: run SPF once for a Jazzer-style launcher + seed.
 #
 # Preferred (hybrid):
-#   python -m cli --work-dir WORK --dse-backend spf --fuzzer-path /path/to/FuzzerLauncher all --corpus /path/to/corpus
+#   python3 -m cli --work-dir WORK all --mode default --fuzzer-path /path/to/FuzzerLauncher
 #
 # Usage:
 #   scripts/run_spf_once.sh --fuzzer-path /path/to/FuzzerLauncher --seed /path/to/seedfile [--out DIR] [--work-dir DIR]
@@ -59,4 +59,3 @@ WORK_DIR="$(abspath "$WORK_DIR")"
 
 mkdir -p "$OUT_DIR"
 exec python3 "$ROOT_DIR/engines/spf_engine.py" --fuzzer-path "$FUZZER_PATH" --work-dir "$WORK_DIR" "$SEED" "$OUT_DIR"
-

@@ -13,7 +13,7 @@ Usage:
   scripts/spf_docker.sh build
   scripts/spf_docker.sh shell
   scripts/spf_docker.sh setup
-  scripts/spf_docker.sh run --corpus /path/to/corpus [--backend spf] [--workers N] [--fuzzer-path /path/to/FuzzerLauncher]
+  scripts/spf_docker.sh run --corpus /path/to/corpus [--mode default|atl] [--backend spf] [--workers N] --fuzzer-path /path/to/FuzzerLauncher
   scripts/spf_docker.sh run-once --fuzzer-path /path/to/FuzzerLauncher --seed /path/to/seedfile [--out work/spf_out]
 
 Notes:
@@ -59,6 +59,7 @@ case "${1:-}" in
   run)
     shift
     CORPUS=""
+    MODE="atl"
     BACKEND="spf"
     WORKERS="1"
     FUZZER_PATH=""
@@ -67,6 +68,10 @@ case "${1:-}" in
       case "$1" in
         --corpus)
           CORPUS="$2"
+          shift 2
+          ;;
+        --mode)
+          MODE="$2"
           shift 2
           ;;
         --backend)
@@ -117,12 +122,12 @@ case "${1:-}" in
       --user "$(id -u):$(id -g)" \
       -e HOME=/workspace/.home \
       -v "$ROOT_DIR:/workspace" \
-      -v "$CORPUS_HOST:/mnt/corpus:ro" \
+      -v "$CORPUS_HOST:/workspace/work/corpus" \
       -w /workspace \
       "$IMAGE_NAME" \
       bash -lc "\
       if [[ -f scripts/spf_env.sh ]]; then source scripts/spf_env.sh; fi; \
-      python3 -m cli --corpus /mnt/corpus --dse-backend \"$BACKEND\" --dse-workers \"$WORKERS\" ${FUZZER_PATH:+--fuzzer-path \"$FUZZER_PATH\"} all \
+      python3 -m cli --work-dir work all --mode \"$MODE\" --no-router --no-fuzzer --no-watcher --dse-backend \"$BACKEND\" --dse-workers \"$WORKERS\" --fuzzer-path \"$FUZZER_PATH\" \
     "
     ;;
   run-once)

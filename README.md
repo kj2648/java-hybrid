@@ -5,12 +5,18 @@ Minimal orchestrator for running a **hybrid pipeline (coverage fuzzer + DSE)** o
 Core pipeline:
 
 - `watcher`: detect corpus plateau and enqueue seeds into `work/queue/`
-- `dse_worker`: claim seeds, run `engines/*_engine.py`, and import generated inputs back into the corpus
+- `dse_worker`: claim seeds, run `engines/*_engine.py`, and deliver generated inputs based on mode:
+  - `default`: to `work/corpus/`
+  - `atl`: to `work/zmq/seeds/` (for OOFMutate via ZMQ)
 
 ## Quickstart
 
 ```bash
-python3 -m cli --corpus /path/to/corpus --work-dir work --dse-backend spf --fuzzer-path /path/to/launcher all
+# 1) initialize the work directory layout
+python3 -m cli --work-dir work init
+
+# 2) run the full pipeline (router + fuzzer + watcher + DSE workers)
+python3 -m cli --work-dir work all --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName>
 ```
 
 Help:
@@ -29,7 +35,11 @@ flowchart LR
   Inflight --> Worker[dse_worker.py]
   Worker -->|runs| Engine[*_engine.py]
   Engine -->|writes outputs| OutTmp[work/generated/wN]
-  Worker -->|import_generated<br/>size caps, fast dedup| Corpus
+  Worker -->|deliver generated| Deliver{sink}
+  Deliver -->|zmq| ZmqSeeds[work/zmq/seeds]
+  Deliver -->|corpus| Corpus
+  ZmqSeeds --> Router[atl_zmq_router.py]
+  Router -->|OOFMutate| Fuzzer[atl-jazzer Dealer]
   Worker --> Logs[work/logs]
 ```
 
@@ -40,9 +50,10 @@ Design points:
 
 ## CLI roles (`cli.py`)
 
+- `init`: create `<work-dir>/` structure
 - `watcher`: only plateau detection + enqueue
 - `dse`: process seeds (run backend engine + import)
-- `all`: spawn 1 watcher + N workers as subprocesses
+- `all`: run full pipeline (router + fuzzer + watcher + DSE workers)
 
 backend:
 
@@ -51,15 +62,26 @@ backend:
   - requires `--fuzzer-path` (a Jazzer-style OSS-Fuzz launcher script)
 - `--dse-backend swat`: placeholder (`engines/swat_engine.py`)
 
+Notes:
+
+- Corpus dir is always `<work-dir>/corpus`.
+- `--fuzzer-path` is required by `all` (and by `dse` when `--dse-backend=spf`).
+
 ## Work directory (`--work-dir`)
 
 ```text
 work/
+  corpus/               # fuzzer corpus (default)
   queue/                # seeds enqueued by watcher
     .inflight/          # claimed seeds (queue -> inflight via atomic move)
   generated/
     w<N>/               # per-worker staging (cleared per seed)
   logs/                 # watcher + worker logs
+  fuzzer/               # generated wrappers (e.g. atl_<FuzzerName>)
+  zmq/
+    seeds/              # router watch dir (default)
+    router.addr         # chosen ZMQ bind addr for this work-dir
+    shm.name            # chosen shared memory name for this work-dir
 ```
 
 ## Queue semantics
@@ -72,7 +94,9 @@ work/
 
 Only **top-level files directly under out_tmp** are considered for import (subdirectories are ignored).
 
-- Size bounds: `[Config.min_generated_bytes, Config.max_generated_bytes]`
+- Size bounds:
+  - to corpus: `[Config.min_generated_bytes, Config.max_generated_bytes_corpus]`
+  - to zmq: `[Config.min_generated_bytes, min(Config.max_generated_bytes_zmq, Config.zmq_max_payload_bytes)]`
 - Per-seed cap: `Config.max_import_per_seed`
 - Fast dedup:
   - within batch: skip duplicates by `fast_fingerprint`
@@ -105,12 +129,38 @@ Engines are strictly “one seed per invocation”.
 
 The SPF engine (`engines/spf_engine.py`) parses the Jazzer launcher to obtain classpath/target class, generates + compiles a harness into a cache directory, then runs JPF.
 
-- If you want to use Team-Atlanta's `atl-jazzer` fork as the Jazzer binary, you can fetch just that subtree and generate a compatible launcher script (recommended: keep the launcher under this repo so `$this_dir`-relative paths work):
+  - If you want to use Team-Atlanta's `atl-jazzer` fork as the Jazzer binary, you can fetch just that subtree and generate a compatible launcher script (recommended: keep the launcher under this repo so `$this_dir`-relative paths work):
   - Fetch: `scripts/fetch_atl_jazzer.sh --build` (or build manually: `cd third_party/atl-jazzer && bazelisk build //:jazzer`)
   - Generate launcher: `python3 scripts/make_jazzer_launcher.py --out work/FuzzerLauncher --cp '<classpath>' --target-class '<FuzzTargetClass>'`
-  - Then run `python3 -m cli ... --dse-backend spf --fuzzer-path work/FuzzerLauncher all`
+  - Then run: `python3 -m cli --work-dir work all --mode default --fuzzer-path work/FuzzerLauncher`
   - If you don't want to touch `oss-fuzz/build/out`, generate a separate wrapper launcher that uses `atl-jazzer` but reuses the OSS-Fuzz target artifacts:
     - `python3 scripts/make_atl_jazzer_wrapper_from_ossfuzz.py --ossfuzz-launcher /path/to/oss-fuzz/build/out/<project>/<FuzzerName> --out /path/to/<atl_FuzzerName>`
+    - (optional OOFMutate) add `--zmq-router-addr ... --zmq-harness-id ...` to bake `ATLJAZZER_ZMQ_*` env vars into the wrapper
+
+- If your atl-jazzer build enables **OOFMutate via ZMQ** (Dealer inside libFuzzer), you can deliver SPF-generated inputs to the fuzzer *without copying them into the fuzzer corpus*:
+  - Run everything together (router auto-starts and persists its addr under `<work-dir>/zmq/router.addr`):
+    - `python3 -m cli --work-dir work all --mode atl --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName> -- -runs=0`
+  - Default (corpus-sharing) mode:
+    - `python3 -m cli --work-dir work all --mode default --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName>`
+  - Notes:
+    - `cli` adds `-reload=1` (and `-artifact_prefix=<work-dir>/artifacts/`) to the fuzzer command unless you override them via `--`.
+    - `--mode atl` requires a ZMQ Dealer inside the fuzzer (OOFMutate). If no Dealer is detected, the run fails fast (otherwise seeds would just accumulate under `<work-dir>/zmq/seeds` with no ACK).
+
+### ZMQ debugging tips
+
+- Router side:
+  - Use `--log-level DEBUG` and watch for:
+    - `dealer joined` (Dealer heartbeats are arriving)
+    - `sent SEED ...` (a seed file was picked and sent)
+    - `recv ACK ...` (Dealer acked the seed)
+  - Watch the seed directory state transitions:
+    - `<name>` -> `<name>.inflight` (sent, waiting for ACK)
+    - `<name>.sent` (ACK received; unless `--delete-processed`)
+
+- Dealer/fuzzer side:
+  - Set `ATLJAZZER_ZMQ_DEALER_LOG=/tmp/dealer.log` (or rely on `<work-dir>/logs/dealer_<HARNESS_ID>.log`) and check it for:
+    - `Connected to router ...`
+    - `Received SEED BATCH ...` / `ACK sent ...`
 
 - Local setup: `scripts/setup_spf.sh` (requires network for git clone)
 - Docker workflow: see `docker/README.md`

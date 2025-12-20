@@ -335,7 +335,7 @@ Next:
        SPF_CLASSPATH=...
   2) source scripts/spf_env.sh
   3) Run orchestrator:
-       python -m cli --corpus /path/to/corpus --dse-backend spf all
+       python3 -m cli --work-dir work all --mode default --fuzzer-path /path/to/FuzzerLauncher
 
 Notes:
   - jpf-symbc tests are disabled by default; set SPF_BUILD_TESTS=1 to compile them.

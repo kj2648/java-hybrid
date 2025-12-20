@@ -10,7 +10,7 @@ class Watcher:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         ensure_dirs(cfg.work_dir)
-        self.corpus: Path = cfg.corpus_dir
+        self.corpus: Path = cfg.corpus_dir_resolved
         self.queue: Path = cfg.queue_dir
         self.logs: Path = cfg.logs_dir
         self.log_path: Path = self.logs / "watcher.log"
@@ -47,7 +47,6 @@ class Watcher:
         while True:
             files = safe_list_files(self.corpus)
             count = len(files)
-            print(count)
             if count > self.last_count:
                 self.last_count = count
                 self.last_change = time.time()

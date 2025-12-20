@@ -10,6 +10,10 @@ def ensure_dirs(work_dir: Path):
     (work_dir / "queue").mkdir(parents=True, exist_ok=True)
     (work_dir / "generated").mkdir(parents=True, exist_ok=True)
     (work_dir / "logs").mkdir(parents=True, exist_ok=True)
+    (work_dir / "corpus").mkdir(parents=True, exist_ok=True)
+    (work_dir / "artifacts").mkdir(parents=True, exist_ok=True)
+    (work_dir / "zmq" / "seeds").mkdir(parents=True, exist_ok=True)
+    (work_dir / "fuzzer").mkdir(parents=True, exist_ok=True)
 
 def safe_list_files(d: Path) -> List[Path]:
     if not d.exists():
