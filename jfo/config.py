@@ -21,11 +21,12 @@ class Config:
     # DSE
     dummy_engine: Path = Path("engines/dummy_engine.py")
     spf_engine: Path = Path("engines/spf_engine.py")
+    gdart_engine: Path = Path("engines/gdart_engine.py")
     swat_engine: Path = Path("engines/swat_engine.py")
     fuzzer_path: Path | None = None
 
     # DSE worker behavior
-    dse_backend: str = "spf"
+    dse_backend: str = "gdart"
     dse_workers: int = 1
     dse_poll_interval: int = 3  # seconds
     dse_timeout_sec: int = 60   # kill hung engine runs
@@ -103,6 +104,8 @@ class Config:
         b = (self.dse_backend or "").lower()
         if b == "spf":
             return self.spf_engine
+        if b == "gdart":
+            return self.gdart_engine
         if b == "swat":
             return self.swat_engine
         return self.dummy_engine

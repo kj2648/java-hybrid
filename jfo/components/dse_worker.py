@@ -43,9 +43,11 @@ class DSEWorker:
 
             log_path = self.logs / f"dse_w{wid}_{seed_claimed.name}.log"
             cmd = [os.environ.get("PYTHON", "python3"), str(self.engine)]
-            if (self.cfg.dse_backend or "").lower() == "spf":
+            if (self.cfg.dse_backend or "").lower() in {"spf", "gdart"}:
                 if self.cfg.fuzzer_path is None:
-                    raise SystemExit("[spf] missing fuzzer path in config (pass --fuzzer-path via CLI)")
+                    raise SystemExit(
+                        "[dse] missing fuzzer path in config (pass --fuzzer-path via CLI; required for spf/gdart)"
+                    )
                 cmd += ["--fuzzer-path", str(self.cfg.fuzzer_path), "--work-dir", str(self.cfg.work_dir)]
             cmd += [str(seed_claimed), str(out_tmp)]
             cmd_str = shlex.join(cmd)

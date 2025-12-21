@@ -5,6 +5,7 @@ work*/
 w*/
 third_party/
 scripts/spf_env.sh
+scripts/gdart_env.sh
 .vendor_tmp/
 
 Crash_*.java

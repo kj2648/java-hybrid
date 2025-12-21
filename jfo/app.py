@@ -18,7 +18,7 @@ class App:
         p.add_argument("--no-fuzzer", action="store_true", help=argparse.SUPPRESS)
         p.add_argument("--no-watcher", action="store_true", help=argparse.SUPPRESS)
         p.add_argument("--no-dse", action="store_true", help=argparse.SUPPRESS)
-        p.add_argument("--dse-backend", choices=["dummy", "spf", "swat"], default=None, help=argparse.SUPPRESS)
+        p.add_argument("--dse-backend", choices=["dummy", "spf", "gdart", "swat"], default=None, help=argparse.SUPPRESS)
         p.add_argument("--dse-workers", type=int, default=None, help=argparse.SUPPRESS)
         p.add_argument("fuzzer_args", nargs=argparse.REMAINDER, help="Extra args passed to the fuzzer after `--`")
 

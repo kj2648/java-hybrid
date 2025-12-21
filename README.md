@@ -79,6 +79,8 @@ backend:
 - `--dse-backend dummy`: smoke-test engine (`engines/dummy_engine.py`)
 - `--dse-backend spf`: SPF/JPF-based DSE (`engines/spf_engine.py`)  
   - requires `--fuzzer-path` (a Jazzer-style OSS-Fuzz launcher script)
+- `--dse-backend gdart`: SPouT recording + GDART solving (`engines/gdart_engine.py`)  
+  - requires `--fuzzer-path` (a Jazzer-style OSS-Fuzz launcher script)
 - `--dse-backend swat`: placeholder (`engines/swat_engine.py`)
 
 Notes:
@@ -188,3 +190,24 @@ The SPF engine (`engines/spf_engine.py`) parses the Jazzer launcher to obtain cl
 - Useful env vars:
   - `JPF_HOME`, `JPF_SYMBC`, `SPF_SITE` (defaults under `third_party/spf/`)
   - `SPF_SEED_MAX_BYTES`, `SPF_SYMBOLIC_ARRAYS`, `SPF_USE_SYMBOLIC_LISTENER`
+
+## GDART backend notes
+
+The GDART engine (`engines/gdart_engine.py`) uses the DSE framework + SPouT concolic executor.
+It runs per seed and produces new inputs by parsing the explored `-Dconcolic.bytes=...` models from GDART output.
+
+Setup:
+
+- Install/build GDART (includes SPouT submodule). Recommended location: `third_party/gdart/`
+  - upstream: `https://github.com/tudo-aqua/gdart`
+  - build: `cd third_party/gdart && ./build.sh`
+- Recommended: `scripts/setup_gdart.sh` (clones into `third_party/gdart/` and builds; then source `scripts/gdart_env.sh`).  
+  By default it skips tests; add `--run-tests` if you want upstream tests.
+- Or set `GDART_HOME=/path/to/gdart` to point at an existing build.
+
+Tuning (optional):
+
+- `GDART_SEED_MAX_BYTES` (default: 128)
+- `GDART_SOLVER` (default: `z3`)
+- `GDART_EXPLORE` (default: `dfs`)
+- `GDART_TERMINATE_ON` (default: `completion`)
