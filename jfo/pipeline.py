@@ -1,5 +1,4 @@
 import multiprocessing
-import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,11 +111,11 @@ class Pipeline:
                     rc = sup.poll(p)
                     if rc is not None:
                         print(f"[Main] child {i} ({name}) exited rc={rc}")
-                        sup.terminate_all()
+                        sup.terminate_all(graceful=True)
                         raise SystemExit(int(rc or 0))
         except KeyboardInterrupt:
             print("[Main] stopping...")
-            sup.terminate_all()
+            sup.terminate_all(graceful=True)
         return 0
 
     def _maybe_fail_fast_atl_dealer(self, *, harness: str, sup: ProcessSupervisor, opt: AllOptions) -> None:
@@ -146,5 +145,5 @@ class Pipeline:
                 "  - If you don't have Dealer support, use `--mode default` instead.\n"
                 "  - Or run without DSE (advanced option: `--no-dse`) until Dealer works."
             )
-            sup.terminate_all()
+            sup.terminate_all(graceful=True)
             raise SystemExit(2)
