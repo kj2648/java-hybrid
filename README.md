@@ -1,6 +1,6 @@
-# java-hybrid orchestrator
+# JFO (Java Fuzz Orchestrator)
 
-Minimal orchestrator for running a **hybrid pipeline (coverage fuzzer + DSE)** on Java OSS-Fuzz targets.
+JFO runs a **hybrid pipeline (coverage fuzzer + DSE)** for Java OSS-Fuzz targets.
 
 Core pipeline:
 
@@ -13,49 +13,62 @@ Core pipeline:
 
 ```bash
 # run the full pipeline (seed-router + fuzzer + watcher + DSE workers)
-python3 -m cli --work-dir work --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName>
+python3 -m jfo --work-dir work --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName>
 ```
 
 Help:
 
 ```bash
-python3 -m cli --help
+python3 -m jfo --help
 ```
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-  Corpus[Corpus dir] -->|plateau scan| Watcher[hybrid/components/watcher.py]
-  Watcher -->|atomic copy| Queue[work/queue]
-  Queue -->|atomic move, claim| Inflight[work/queue/.inflight]
-  Inflight --> Worker[hybrid/components/dse_worker.py]
-  Worker -->|runs| Engine[*_engine.py]
-  Engine -->|writes outputs| OutTmp[work/generated/wN]
-  Worker -->|deliver generated| Deliver{sink}
-  Deliver -->|zmq| ZmqSeeds[work/zmq/seeds]
-  Deliver -->|corpus| Corpus
-  ZmqSeeds --> Router[hybrid/seed_router.py]
-  Router -->|OOFMutate| Fuzzer[atl-jazzer Dealer]
-  Worker --> Logs[work/logs]
+flowchart TD
+  subgraph Fuzzer
+    L["OSS-Fuzz launcher"]
+    C["corpus/"]
+    D["OOFMutate Dealer (atl)"]
+    L --> D
+    L -->|reload| C
+  end
+
+  subgraph Orchestrator
+    W["Watcher"]
+    Q["queue/"]
+    X["DSE worker(s)"]
+  end
+
+  subgraph Engines
+    E["DSE engines<br/>SPF / SWAT / ..."]
+  end
+
+  subgraph SeedRouter
+    Z["zmq/seeds/"]
+    R["seed-router"]
+    Z --> R
+  end
+
+  C -->|plateau| W -->|enqueue| Q -->|claim| X
+  X -->|runs| E
+  X -->|"import (default)"| C
+  X -->|"import (atl)"| Z
+  R -->|SEED via shm| D
+  D -->|ACK| R
 ```
-
-Design points:
-
-- Queue, claim, and import use **atomic rename/copy** so multiple workers can run concurrently.
-- Engines are “one seed in, write files to out_tmp” only; timeout/dedup/import policy lives in the worker.
 
 ## Code layout
 
-- Entry point: `cli.py` → `hybrid/app.py`
-- Pipeline orchestration: `hybrid/pipeline.py`
+- Entry point: `cli.py` → `jfo/app.py`
+- Pipeline orchestration: `jfo/pipeline.py`
 - Components:
-  - Corpus plateau watcher: `hybrid/components/watcher.py`
-  - DSE worker: `hybrid/components/dse_worker.py`
-  - Fuzzer runner: `hybrid/components/fuzzer.py`
-  - ATL Jazzer launcher generator: `hybrid/components/atl_jazzer_launcher.py`
-- ZMQ seed-router (process + auto-start helper): `hybrid/seed_router.py`
-- Utilities: `hybrid/util/`
+  - Corpus plateau watcher: `jfo/components/watcher.py`
+  - DSE worker: `jfo/components/dse_worker.py`
+  - Fuzzer runner: `jfo/components/fuzzer.py`
+  - ATL Jazzer launcher generator: `jfo/components/atl_jazzer_launcher.py`
+- ZMQ seed-router (process + auto-start helper): `jfo/seed_router.py`
+- Utilities: `jfo/util/`
 
 ## CLI (`cli.py`)
 
@@ -96,7 +109,7 @@ work/
 - Claim name: `"<seed>.w<id>.pid<PID>"`
 - Claim order: oldest by mtime first
 
-## Import policy (`hybrid/util/fs.py:import_generated`)
+## Import policy (`jfo/util/fs.py:import_generated`)
 
 Only **top-level files directly under out_tmp** are considered for import (subdirectories are ignored).
 
@@ -115,17 +128,17 @@ Engines are strictly “one seed per invocation”.
 
 - Input: `<seed_file> <out_dir>`
 - Output: write generated inputs as files directly under `out_dir` (import is done by the worker)
-- Policy separation: timeout/dedup/import/corpus ownership belongs to `hybrid/components/dse_worker.py`
+- Policy separation: timeout/dedup/import/corpus ownership belongs to `jfo/components/dse_worker.py`
 
-## `hybrid/components/watcher.py`
+## `jfo/components/watcher.py`
 
 - Periodically scans the corpus directory and declares a plateau when the **file count stops increasing**.
 - On plateau, selects recent-ish candidates (`pick_candidates`) and enqueues up to `Config.seeds_per_plateau`.
 - Re-enqueue protection is per-process (`sha256` in-memory); restarting the watcher can re-enqueue the same seed.
 
-## `hybrid/components/dse_worker.py`
+## `jfo/components/dse_worker.py`
 
-- Claim: `hybrid.util.claim_one_seed` atomically moves `queue/<seed>` → `queue/.inflight/<seed>.w<id>.pid<PID>`
+- Claim: `jfo.util.claim_one_seed` atomically moves `queue/<seed>` → `queue/.inflight/<seed>.w<id>.pid<PID>`
 - Stage: clears `work/generated/w<id>` per seed so only this run’s outputs are imported
 - Run: executes the engine and writes stdout/stderr to `work/logs/`
 - Timeout: after `Config.dse_timeout_sec`, kills the engine process group
@@ -138,16 +151,16 @@ The SPF engine (`engines/spf_engine.py`) parses the Jazzer launcher to obtain cl
   - If you want to use Team-Atlanta's `atl-jazzer` fork as the Jazzer binary, you can fetch just that subtree and generate a compatible launcher script (recommended: keep the launcher under this repo so `$this_dir`-relative paths work):
   - Fetch: `scripts/fetch_atl_jazzer.sh --build` (or build manually: `cd third_party/atl-jazzer && bazelisk build //:jazzer`)
   - Generate launcher: `python3 scripts/make_jazzer_launcher.py --out work/FuzzerLauncher --cp '<classpath>' --target-class '<FuzzTargetClass>'`
-  - Then run: `python3 -m cli --work-dir work --mode default --fuzzer-path work/FuzzerLauncher`
+  - Then run: `python3 -m jfo --work-dir work --mode default --fuzzer-path work/FuzzerLauncher`
   - If you don't want to touch `oss-fuzz/build/out`, generate a separate **ATL Jazzer launcher script** that reuses the OSS-Fuzz target artifacts:
     - `python3 scripts/make_atl_jazzer_wrapper_from_ossfuzz.py --ossfuzz-launcher /path/to/oss-fuzz/build/out/<project>/<FuzzerName> --out /path/to/<atl_FuzzerName>`
     - (optional OOFMutate) add `--zmq-router-addr ... --zmq-harness-id ...` to bake `ATLJAZZER_ZMQ_*` env vars into the launcher
 
   - If your atl-jazzer build enables **OOFMutate via ZMQ** (Dealer inside libFuzzer), you can deliver SPF-generated inputs to the fuzzer *without copying them into the fuzzer corpus*:
   - Run everything together (router auto-starts and persists its addr under `<work-dir>/zmq/router.addr`):
-    - `python3 -m cli --work-dir work --mode atl --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName> -- -runs=0`
+    - `python3 -m jfo --work-dir work --mode atl --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName> -- -runs=0`
   - Default (corpus-sharing) mode:
-    - `python3 -m cli --work-dir work --mode default --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName>`
+    - `python3 -m jfo --work-dir work --mode default --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName>`
   - Notes:
     - `cli` adds `-reload=1` (and `-artifact_prefix=<work-dir>/artifacts/`) to the fuzzer command unless you override them via `--`.
     - `--mode atl` requires a ZMQ Dealer inside the fuzzer (OOFMutate). If no Dealer is detected, the run fails fast (otherwise seeds would just accumulate under `<work-dir>/zmq/seeds` with no ACK).
@@ -156,7 +169,7 @@ The SPF engine (`engines/spf_engine.py`) parses the Jazzer launcher to obtain cl
 
 - Seed-router side:
   - Manual start (normally auto-started by `cli --mode atl`):
-    - `python3 -m hybrid.seed_router --bind tcp://127.0.0.1:5555 --harness <HARNESS_ID> --work-dir work --log-level DEBUG`
+    - `python3 -m jfo.seed_router --bind tcp://127.0.0.1:5555 --harness <HARNESS_ID> --work-dir work --log-level DEBUG`
   - Use `--log-level DEBUG` and watch for:
     - `dealer joined` (Dealer heartbeats are arriving)
     - `sent SEED ...` (a seed file was picked and sent)
