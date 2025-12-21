@@ -317,7 +317,7 @@ export SPF_TARGET="\${SPF_TARGET:-com.example.Main}"
 export SPF_CLASSPATH="\${SPF_CLASSPATH:-/abs/path/to/your/classes:/abs/path/to/deps.jar}"
 
 # Optional tuning
-export SPF_TEMPLATE="\${SPF_TEMPLATE:-$ROOT_DIR/templates/spf_run.jpf.tpl}"
+export SPF_TEMPLATE="\${SPF_TEMPLATE:-$ROOT_DIR/templates/spf/spf_run.jpf.tpl}"
 export SPF_JAVA="\${SPF_JAVA:-java}"
 export SPF_JVM_OPTS="\${SPF_JVM_OPTS:--Xmx2g}"
 export SPF_TIME_BUDGET="\${SPF_TIME_BUDGET:-30}"
