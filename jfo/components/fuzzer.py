@@ -34,14 +34,7 @@ class FuzzerRunner:
 
     def _build_env(self) -> dict[str, str]:
         env = os.environ.copy()
-        tmpdir = (self.cfg.work_dir / "tmp").resolve()
-        try:
-            tmpdir.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            tmpdir = None
         extra_java_opts = []
-        if tmpdir is not None:
-            extra_java_opts.append(f"-Djava.io.tmpdir={tmpdir}")
         extra_java_opts += ["-Djdk.attach.allowAttachSelf=true", "-XX:+StartAttachListener"]
         prev = env.get("JAVA_TOOL_OPTIONS", "")
         for opt in extra_java_opts:
