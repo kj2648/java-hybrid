@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import random
-import socket
 import struct
 import subprocess
 import sys
@@ -58,14 +57,6 @@ def _parse_tcp_bind(addr: str) -> tuple[str, int] | None:
     return host, port
 
 
-def _tcp_port_open(host: str, port: int, *, timeout_sec: float = 0.25) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=timeout_sec):
-            return True
-    except OSError:
-        return False
-
-
 def _seed_router_cmd(*, cfg: Config, bind: str, shm_name: str, harness: str) -> list[str]:
     cmd = [
         sys.executable,
@@ -112,16 +103,12 @@ def ensure_seed_router_running(
     """
     Ensure a seed-router is running for the work-dir's seed feed.
 
-    Returns (effective params, proc-or-none). If the TCP bind is already in use, we assume a seed-router
-    is running and return proc=None.
+    Returns (effective params, proc). If the TCP bind is already in use and no explicit bind was given,
+    we retry with a random port and persist it into the work-dir so the fuzzer wrapper uses the same bind.
     """
     effective = params
     for attempt in range(5):
         tcp = _parse_tcp_bind(effective.bind_addr)
-        if tcp and _tcp_port_open(tcp[0], tcp[1]):
-            print(f"[Main] seed-router bind already in use: {effective.bind_addr}; assuming it is already running")
-            return SeedRouterRunning(params=effective, proc=None)
-
         router_log = cfg.logs_dir / "router.log"
         router_log.parent.mkdir(parents=True, exist_ok=True)
         lf = open(router_log, "ab", buffering=0)
@@ -142,6 +129,10 @@ def ensure_seed_router_running(
 
         host = tcp[0] if tcp else "127.0.0.1"
         new_bind = f"tcp://{host}:{_pick_random_tcp_port()}"
+        print(
+            f"[Main] seed-router failed to start on bind={effective.bind_addr} (rc={p.returncode}); "
+            f"retrying with bind={new_bind}"
+        )
         workdir.persist_seed_router_bind(new_bind)
         effective = SeedRouterParams(bind_addr=new_bind, shm_name=effective.shm_name)
         if attempt == 4:
