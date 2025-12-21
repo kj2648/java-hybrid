@@ -1,3 +1,7 @@
+"""
+Logging helpers for long-running pipeline components.
+"""
+
 import logging
 import os
 import time

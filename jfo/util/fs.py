@@ -1,3 +1,7 @@
+"""
+Filesystem helpers (atomic copy, dedup, corpus import).
+"""
+
 import os
 import shutil
 import hashlib

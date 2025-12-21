@@ -1,9 +1,9 @@
 import time
 from pathlib import Path
 
-from config import Config
-from util import ensure_dirs, safe_list_files, sha256_file, atomic_copy_to_dir, pick_candidates
-from logutil import make_file_logger
+from jfo.config import Config
+from jfo.util.fs import ensure_dirs, safe_list_files, sha256_file, atomic_copy_to_dir, pick_candidates
+from jfo.util.log import make_file_logger
 
 
 class Watcher:

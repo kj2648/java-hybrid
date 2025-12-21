@@ -35,7 +35,7 @@ class Config:
     # - atl:     DSE outputs go to <work-dir>/zmq/seeds (fuzzer consumes via ZMQ Dealer/OOFMutate)
     mode: str = "default"
 
-    # ZMQ router defaults (for atl_zmq_router)
+    # ZMQ seed-router defaults (for `python3 -m jfo.seed_router`)
     zmq_router_bind: str = "tcp://127.0.0.1:5555"
     zmq_shm_name: str = "atl-jazzer-shm"
     zmq_shm_items: int = 1024
@@ -95,7 +95,7 @@ class Config:
 
     @property
     def zmq_max_payload_bytes(self) -> int:
-        # atl_zmq_router shared memory item size reserves 4 bytes for payload length.
+        # The seed-router shared memory item size reserves 4 bytes for payload length.
         return max(0, int(self.zmq_shm_item_size) - 4)
 
     @property

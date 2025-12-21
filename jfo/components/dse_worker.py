@@ -6,9 +6,9 @@ import shlex
 import signal
 from pathlib import Path
 
-from config import Config
-from util import ensure_dirs, claim_one_seed, import_generated, safe_list_files
-from logutil import open_run_log
+from jfo.config import Config
+from jfo.util.fs import ensure_dirs, claim_one_seed, import_generated, safe_list_files
+from jfo.util.log import open_run_log
 
 
 class DSEWorker:

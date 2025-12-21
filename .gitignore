@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 
 work*/
+w*/
 third_party/
 scripts/spf_env.sh
 .vendor_tmp/
+
+Crash_*.java

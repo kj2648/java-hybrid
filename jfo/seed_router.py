@@ -4,7 +4,11 @@ import asyncio
 import json
 import logging
 import os
+import random
+import socket
 import struct
+import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass, asdict
@@ -15,12 +19,135 @@ from typing import Optional
 import zmq
 import zmq.asyncio
 
-logger = logging.getLogger("atl-zmq-router")
+from jfo.config import Config
+from jfo.util.workdir import SeedRouterParams, WorkDir
+
+logger = logging.getLogger("zmq-seed-router")
 
 _HEADER_FMT = "<II"  # item_size:uint32, item_num:uint32
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 8
 _LEN_FMT = "<I"  # payload length:uint32
 _LEN_SIZE = struct.calcsize(_LEN_FMT)  # 4
+
+
+@dataclass(frozen=True, slots=True)
+class SeedRouterRunning:
+    params: SeedRouterParams
+    proc: subprocess.Popen | None
+
+
+def _pick_random_tcp_port() -> int:
+    return random.randint(20000, 65000)
+
+
+def _parse_tcp_bind(addr: str) -> tuple[str, int] | None:
+    s = (addr or "").strip()
+    if not s.startswith("tcp://"):
+        return None
+    hp = s[len("tcp://") :]
+    if not hp or ":" not in hp:
+        return None
+    host, port_s = hp.rsplit(":", 1)
+    host = host.strip() or "0.0.0.0"
+    if host == "*":
+        host = "0.0.0.0"
+    try:
+        port = int(port_s)
+    except ValueError:
+        return None
+    return host, port
+
+
+def _tcp_port_open(host: str, port: int, *, timeout_sec: float = 0.25) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout_sec):
+            return True
+    except OSError:
+        return False
+
+
+def _seed_router_cmd(*, cfg: Config, bind: str, shm_name: str, harness: str) -> list[str]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "jfo.seed_router",
+        "--bind",
+        bind,
+        "--harness",
+        harness,
+        "--work-dir",
+        str(cfg.work_dir),
+        "--shm-name",
+        shm_name,
+        "--shm-items",
+        str(cfg.zmq_shm_items),
+        "--shm-item-size",
+        str(cfg.zmq_shm_item_size),
+        "--dealer-timeout",
+        str(cfg.zmq_dealer_timeout),
+        "--ack-timeout",
+        str(cfg.zmq_ack_timeout),
+        "--poll-interval",
+        str(cfg.zmq_poll_interval),
+        "--status-interval",
+        str(cfg.zmq_status_interval),
+        "--script-id",
+        str(cfg.zmq_script_id),
+        "--log-level",
+        cfg.zmq_log_level,
+    ]
+    if cfg.zmq_delete_processed:
+        cmd.append("--delete-processed")
+    return cmd
+
+
+def ensure_seed_router_running(
+    *,
+    cfg: Config,
+    workdir: WorkDir,
+    params: SeedRouterParams,
+    harness: str,
+    explicit_bind: bool,
+) -> SeedRouterRunning:
+    """
+    Ensure a seed-router is running for the work-dir's seed feed.
+
+    Returns (effective params, proc-or-none). If the TCP bind is already in use, we assume a seed-router
+    is running and return proc=None.
+    """
+    effective = params
+    for attempt in range(5):
+        tcp = _parse_tcp_bind(effective.bind_addr)
+        if tcp and _tcp_port_open(tcp[0], tcp[1]):
+            print(f"[Main] seed-router bind already in use: {effective.bind_addr}; assuming it is already running")
+            return SeedRouterRunning(params=effective, proc=None)
+
+        router_log = cfg.logs_dir / "router.log"
+        router_log.parent.mkdir(parents=True, exist_ok=True)
+        lf = open(router_log, "ab", buffering=0)
+        p = subprocess.Popen(
+            _seed_router_cmd(cfg=cfg, bind=effective.bind_addr, shm_name=effective.shm_name, harness=harness),
+            stdout=lf,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        time.sleep(0.5)
+        if p.poll() is None:
+            return SeedRouterRunning(params=effective, proc=p)
+
+        if explicit_bind:
+            raise SystemExit(
+                f"[Main] seed-router failed to start on bind={effective.bind_addr} (rc={p.returncode}); see {router_log}"
+            )
+
+        host = tcp[0] if tcp else "127.0.0.1"
+        new_bind = f"tcp://{host}:{_pick_random_tcp_port()}"
+        workdir.persist_seed_router_bind(new_bind)
+        effective = SeedRouterParams(bind_addr=new_bind, shm_name=effective.shm_name)
+        if attempt == 4:
+            raise SystemExit(f"[Main] seed-router failed to start after retries; see {router_log}")
+
+    return SeedRouterRunning(params=effective, proc=None)
 
 
 class SeedShmemPoolProducer:
@@ -139,7 +266,7 @@ class _Inflight:
     original_path: Path
 
 
-class AtlZmqRouter:
+class ZmqSeedRouter:
     def __init__(
         self,
         *,
@@ -490,7 +617,9 @@ class AtlZmqRouter:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser("atl_zmq_router: ZMQ ROUTER that feeds atl-jazzer OOFMutate Dealer from a watch directory")
+    ap = argparse.ArgumentParser(
+        "seed_router: ZMQ ROUTER that feeds atl-jazzer OOFMutate Dealer from a seed directory"
+    )
     ap.add_argument("--bind", default=os.environ.get("ATLJAZZER_ZMQ_ROUTER_BIND", "tcp://127.0.0.1:5555"))
     ap.add_argument("--harness", required=True, help="Harness name (should match ATLJAZZER_ZMQ_HARNESS_ID)")
     watch_group = ap.add_mutually_exclusive_group(required=True)
@@ -519,7 +648,7 @@ def main() -> int:
         work_dir = Path(os.path.expanduser(args.work_dir)).resolve()
         watch_dir = work_dir / "zmq" / "seeds"
 
-    router = AtlZmqRouter(
+    router = ZmqSeedRouter(
         bind_addr=args.bind,
         harness_name=args.harness,
         watch_dir=watch_dir,
