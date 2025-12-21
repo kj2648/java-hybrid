@@ -59,6 +59,8 @@ class DSEWorker:
             zmq_n = None
             zmq_stats = None
             run_log = open_run_log(log_path, logger_name=f"dse_w{wid}")
+            timed_out = False
+            rc = -1
             try:
                 logger = run_log.logger
                 lf = run_log.stream
@@ -82,7 +84,6 @@ class DSEWorker:
                 try:
                     p.wait(timeout=self.cfg.dse_timeout_sec)
                     rc = p.returncode
-                    timed_out = False
                 except subprocess.TimeoutExpired:
                     timed_out = True
                     logger.info("timeout after %ss; killing engine_pid=%s", self.cfg.dse_timeout_sec, p.pid)
@@ -104,7 +105,8 @@ class DSEWorker:
                 if spf_logs_dir.is_dir():
                     logger.info("spf_logs_dir=%s spf_log_files=%s", spf_logs_dir, len(safe_list_files(spf_logs_dir)))
 
-                if rc == 0:
+                should_deliver = (rc == 0) or (timed_out and len(produced) > 0)
+                if should_deliver:
                     if self.mode != "atl":
                         imported_n, imported_stats = import_generated(
                             out_tmp,
@@ -152,6 +154,8 @@ class DSEWorker:
                             zmq_stats.skipped_dst_exists,
                             zmq_stats.errors,
                         )
+                else:
+                    logger.info("deliver_skipped: rc=%s timed_out=%s out_tmp_files=%s", rc, int(timed_out), len(produced))
             finally:
                 run_log.close()
 
