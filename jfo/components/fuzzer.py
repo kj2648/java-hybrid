@@ -64,6 +64,8 @@ class FuzzerRunner:
                 pass
             prefix = str(self.cfg.artifacts_dir.resolve()) + "/"
             args.append(f"-artifact_prefix={prefix}")
+        if self.cfg.fuzzer_close_fd_mask is not None and not self._has_flag(args, "-close_fd_mask"):
+            args.append(f"-close_fd_mask={int(self.cfg.fuzzer_close_fd_mask)}")
         return args
 
     @staticmethod

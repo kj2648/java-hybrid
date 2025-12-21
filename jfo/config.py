@@ -59,6 +59,10 @@ class Config:
     # Keep artifacts (crashes/leaks) under <work-dir>/artifacts unless user overrides.
     fuzzer_set_artifact_prefix: bool = True
 
+    # Reduce noisy "failed to close FD" logs by default. Users can override by
+    # passing `-close_fd_mask=...` explicitly in fuzzer args.
+    fuzzer_close_fd_mask: int | None = 3
+
     # # fuzzer args if you want to run fuzzer role
     # fuzzer_bin: Optional[Path] = None
     # reload_sec: int = 1
