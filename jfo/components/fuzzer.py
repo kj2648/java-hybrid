@@ -28,7 +28,9 @@ class FuzzerRunner:
             stdout=lf,
             stderr=subprocess.STDOUT,
             start_new_session=True,
-            cwd=str(self.cfg.work_dir),
+            # Jazzer/libFuzzer `-jobs` prints shell commands that redirect to `>fuzz-<n>.log`.
+            # Keep those per-worker logs (and JVM hs_err_pid files) under <work-dir>/logs.
+            cwd=str(self.cfg.logs_dir),
             env=env,
         )
 
