@@ -91,6 +91,10 @@ class Config:
         return self.work_dir / "artifacts"
 
     @property
+    def reproducers_dir(self) -> Path:
+        return self.work_dir / "reproducers"
+
+    @property
     def corpus_dir_resolved(self) -> Path:
         return self.work_dir / "corpus"
 

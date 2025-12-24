@@ -46,6 +46,16 @@ class FuzzerRunner:
 
     def _apply_default_fuzzer_args(self, fuzzer_args: list[str]) -> list[str]:
         args = list(fuzzer_args)
+        # Jazzer exits the whole process on the first finding by default. Keep fuzzing so the
+        # orchestrator can continue running without requiring libFuzzer `-fork`.
+        if not self._has_flag(args, "--keep_going"):
+            args.append("--keep_going=0")
+        if not self._has_flag(args, "--reproducer_path"):
+            try:
+                self.cfg.reproducers_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            args.append(f"--reproducer_path={self.cfg.reproducers_dir}")
         if self.cfg.fuzzer_reload and not self._has_flag(args, "-reload"):
             args.append("-reload=1")
         if self.cfg.fuzzer_reload and self.cfg.fuzzer_reload_interval > 0 and not self._has_flag(args, "-reload_interval"):

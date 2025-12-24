@@ -164,7 +164,7 @@ The SPF engine (`engines/spf_engine.py`) parses the Jazzer launcher to obtain cl
   - Default (corpus-sharing) mode:
     - `python3 -m jfo --work-dir work --mode default --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName>`
   - Notes:
-    - `cli` adds `-reload=1`, `-artifact_prefix=<work-dir>/artifacts/`, and `-close_fd_mask=3` unless you override them via `--`.
+    - `cli` adds `--keep_going=0`, `--reproducer_path=<work-dir>/reproducers`, `-reload=1`, `-artifact_prefix=<work-dir>/artifacts/`, and `-close_fd_mask=3` unless you override them via `--`.
     - `--mode atl` requires a ZMQ Dealer inside the fuzzer (OOFMutate). If no Dealer is detected, the run fails fast (otherwise seeds would just accumulate under `<work-dir>/zmq/seeds` with no ACK).
 
 ### ZMQ debugging tips
