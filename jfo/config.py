@@ -53,15 +53,15 @@ class Config:
     # `-reload=1` makes libFuzzer periodically reload corpus dirs from disk, which is useful
     # when other processes (e.g., DSE worker) add new inputs into the corpus during a run.
     fuzzer_reload: bool = True
-    # Not all Jazzer/libFuzzer builds support `-reload_interval`; keep disabled by default.
-    fuzzer_reload_interval: int = 0
 
     # Keep artifacts (crashes/leaks) under <work-dir>/artifacts unless user overrides.
     fuzzer_set_artifact_prefix: bool = True
 
-    # Reduce noisy "failed to close FD" logs by default. Users can override by
-    # passing `-close_fd_mask=...` explicitly in fuzzer args.
-    fuzzer_close_fd_mask: int | None = 3
+    # libFuzzer's `-close_fd_mask` can close stdout/stderr. We default to closing stdout only
+    # (`-close_fd_mask=1`) to suppress noisy fuzz target prints (e.g. System.out.println/printf)
+    # while keeping stderr open for Jazzer's stack traces and DEDUP_TOKEN.
+    # Users can override by passing `-close_fd_mask=...` explicitly in fuzzer args.
+    fuzzer_close_fd_mask: int | None = 1
 
     # # fuzzer args if you want to run fuzzer role
     # fuzzer_bin: Optional[Path] = None
@@ -93,6 +93,10 @@ class Config:
     @property
     def reproducers_dir(self) -> Path:
         return self.work_dir / "reproducers"
+
+    @property
+    def findings_dir(self) -> Path:
+        return self.work_dir / "findings"
 
     @property
     def corpus_dir_resolved(self) -> Path:

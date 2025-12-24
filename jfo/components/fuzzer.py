@@ -52,6 +52,10 @@ class FuzzerRunner:
         # orchestrator can continue running without requiring libFuzzer `-fork`.
         if not self._has_flag(args, "--keep_going"):
             args.append("--keep_going=0")
+        # Ensure Jazzer prints DEDUP_TOKEN so findings can be grouped without re-running crashes.
+        # Respect explicit user choices (`--dedup=...` or `--nodedup`).
+        if (not self._has_flag(args, "--dedup")) and (not self._has_flag(args, "--nodedup")):
+            args.append("--dedup=true")
         if not self._has_flag(args, "--reproducer_path"):
             try:
                 self.cfg.reproducers_dir.mkdir(parents=True, exist_ok=True)
@@ -59,9 +63,7 @@ class FuzzerRunner:
                 pass
             args.append(f"--reproducer_path={self.cfg.reproducers_dir}")
         if self.cfg.fuzzer_reload and not self._has_flag(args, "-reload"):
-            args.append("-reload=1")
-        if self.cfg.fuzzer_reload and self.cfg.fuzzer_reload_interval > 0 and not self._has_flag(args, "-reload_interval"):
-            args.append(f"-reload_interval={int(self.cfg.fuzzer_reload_interval)}")
+            args.append("-reload=30")
         if self.cfg.fuzzer_set_artifact_prefix and not self._has_flag(args, "-artifact_prefix"):
             try:
                 self.cfg.artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -69,7 +71,11 @@ class FuzzerRunner:
                 pass
             prefix = str(self.cfg.artifacts_dir.resolve()) + "/"
             args.append(f"-artifact_prefix={prefix}")
-        if self.cfg.fuzzer_close_fd_mask is not None and not self._has_flag(args, "-close_fd_mask"):
+        if (
+            self.cfg.fuzzer_close_fd_mask is not None
+            and int(self.cfg.fuzzer_close_fd_mask) != 0
+            and not self._has_flag(args, "-close_fd_mask")
+        ):
             args.append(f"-close_fd_mask={int(self.cfg.fuzzer_close_fd_mask)}")
         return args
 

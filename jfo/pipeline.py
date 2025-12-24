@@ -7,6 +7,7 @@ from jfo.config import Config
 from jfo.components.atl_jazzer_launcher import AtlJazzerLauncherGenerator
 from jfo.components.dse_worker import dse_worker
 from jfo.components.fuzzer import FuzzerRunner
+from jfo.components.findings_deduper import run_findings_deduper
 from jfo.components.watcher import watcher_enqueue_seeds
 from jfo.seed_router import ensure_seed_router_running
 from jfo.util.processes import ProcessSupervisor
@@ -84,6 +85,9 @@ class Pipeline:
                         log_path=(self.cfg.logs_dir / "fuzzer.log"),
                     ),
                 )
+                p = multiprocessing.Process(target=run_findings_deduper, args=(self.cfg,), name="findings")
+                p.start()
+                sup.add("findings", p)
 
             if not opt.no_watcher:
                 p = multiprocessing.Process(target=watcher_enqueue_seeds, args=(self.cfg,), name="watcher")
@@ -124,10 +128,19 @@ class Pipeline:
         if opt.no_fuzzer:
             return
         dealer_log = (self.cfg.logs_dir / f"dealer_{harness}.log").resolve()
-        deadline = time.time() + 8.0
+        # Dealer initialization can be slow (especially with `-jobs`, which spawns worker
+        # subprocesses after the initial JVM startup). Avoid false positives by waiting longer.
+        deadline = time.time() + 30.0
         while time.time() < deadline:
             if dealer_log.exists():
                 return
+            # Some builds emit the dealer init message before the log file is created.
+            try:
+                for p in self.cfg.logs_dir.glob("fuzz-*.log"):
+                    if p.is_file() and "Initializing OOF mutation dealer" in p.read_text(encoding="utf-8", errors="replace"):
+                        return
+            except Exception:
+                pass
             fuzzer_exited = any((name == "fuzzer" and p.poll() is not None) for name, p in sup.children)
             if fuzzer_exited:
                 break

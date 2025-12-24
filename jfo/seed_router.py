@@ -619,7 +619,7 @@ def main() -> int:
     ap.add_argument("--shm-name", default=os.environ.get("ATLJAZZER_ZMQ_SHM_NAME", "atl-jazzer-shm"))
     ap.add_argument("--shm-items", type=int, default=int(os.environ.get("ATLJAZZER_ZMQ_SHM_ITEMS", "4096")))
     ap.add_argument("--shm-item-size", type=int, default=int(os.environ.get("ATLJAZZER_ZMQ_SHM_ITEM_SIZE", "8192")))
-    ap.add_argument("--dealer-timeout", type=int, default=int(os.environ.get("ATLJAZZER_ZMQ_DEALER_TIMEOUT", "10")))
+    ap.add_argument("--dealer-timeout", type=int, default=int(os.environ.get("ATLJAZZER_ZMQ_DEALER_TIMEOUT", "30")))
     ap.add_argument("--ack-timeout", type=int, default=int(os.environ.get("ATLJAZZER_ZMQ_ACK_TIMEOUT", "30")))
     ap.add_argument("--poll-interval", type=float, default=float(os.environ.get("ATLJAZZER_ZMQ_POLL_INTERVAL", "0.25")))
     ap.add_argument("--status-interval", type=float, default=float(os.environ.get("ATLJAZZER_ZMQ_STATUS_INTERVAL", "5.0")))
