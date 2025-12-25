@@ -37,7 +37,16 @@ class CoverageRunner:
         self.cfg = cfg
         self.repo_root = repo_root or Path(__file__).resolve().parents[2]
 
-    def run(self, *, harness: str, launcher: Path, fuzzer_runner, fuzzer_args: list[str], runs: int) -> int:
+    def run(
+        self,
+        *,
+        harness: str,
+        launcher: Path,
+        fuzzer_runner,
+        fuzzer_args: list[str],
+        runs: int,
+        max_seconds: int | None,
+    ) -> int:
         args = self._strip_fuzzer_flags(list(fuzzer_args), ("-jobs", "-workers", "-fork", "-merge"))
         args = self._strip_fuzzer_flags(args, ("--coverage_report", "--coverage_dump"))
 
@@ -48,6 +57,8 @@ class CoverageRunner:
         # Ensure the fuzzer exits so the report gets written.
         if (not fuzzer_runner._has_flag(args, "-runs")) and (not fuzzer_runner._has_flag(args, "-max_total_time")):
             args.append(f"-runs={max(1, int(runs or 1))}")
+        if max_seconds is not None and int(max_seconds) > 0 and (not fuzzer_runner._has_flag(args, "-max_total_time")):
+            args.append(f"-max_total_time={int(max_seconds)}")
 
         # Keep the main corpus read-only by using a dedicated output corpus for this run.
         corpus_dirs = [outputs.corpus_out, self.cfg.corpus_dir_resolved]

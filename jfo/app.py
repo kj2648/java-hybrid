@@ -15,6 +15,7 @@ class App:
         p.add_argument("--mode", choices=["default", "atl"], default="default", help="Pipeline mode (default: default)")
         p.add_argument("--coverage", action="store_true", help="Write Jazzer coverage report/dump under <work-dir>/coverage and exit")
         p.add_argument("--coverage-runs", type=int, default=1, help="libFuzzer -runs for --coverage (default: 1)")
+        p.add_argument("--max-seconds", type=int, default=None, help="Stop the run after N seconds (best-effort)")
         p.add_argument("--bind", default=None, help=argparse.SUPPRESS)
         p.add_argument("--no-router", action="store_true", help=argparse.SUPPRESS)
         p.add_argument("--no-fuzzer", action="store_true", help=argparse.SUPPRESS)
@@ -47,6 +48,7 @@ class App:
             no_dse=getattr(args, "no_dse", False),
             coverage=bool(getattr(args, "coverage", False)),
             coverage_runs=int(getattr(args, "coverage_runs", 1) or 1),
+            max_seconds=int(getattr(args, "max_seconds", 0) or 0) or None,
             fuzzer_args=list(getattr(args, "fuzzer_args", [])),
         )
         return Pipeline(cfg=cfg, workdir=workdir).run_all(opt)

@@ -28,6 +28,14 @@ Jazzer can write a JaCoCo-format coverage dump and a human-readable coverage rep
 python3 -m jfo --work-dir work --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName> --coverage
 ```
 
+## Time limit
+
+Stop the run after N seconds (best-effort):
+
+```bash
+python3 -m jfo --work-dir work --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName> --max-seconds 3600
+```
+
 Help:
 
 ```bash

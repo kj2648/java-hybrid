@@ -26,6 +26,7 @@ class AllOptions:
     no_dse: bool
     coverage: bool
     coverage_runs: int
+    max_seconds: int | None
     fuzzer_args: list[str]
 
 
@@ -52,6 +53,7 @@ class Pipeline:
                 fuzzer_runner=self.fuzzer,
                 fuzzer_args=list(opt.fuzzer_args),
                 runs=int(opt.coverage_runs or 1),
+                max_seconds=opt.max_seconds,
             )
 
         params = self.workdir.ensure_seed_router_params(bind=opt.bind, harness=harness)
@@ -122,8 +124,15 @@ class Pipeline:
                     sup.add(f"dse[{wid}]", p)
 
             print(f"[Main] started processes={len(sup.children)} (Ctrl+C to stop)")
+            deadline = None
+            if opt.max_seconds is not None and int(opt.max_seconds) > 0:
+                deadline = time.time() + float(opt.max_seconds)
             while True:
                 time.sleep(2)
+                if deadline is not None and time.time() >= deadline:
+                    print(f"[Main] time limit reached: {int(opt.max_seconds)}s (stopping...)")
+                    sup.terminate_all(graceful=True)
+                    return 0
                 for i, (name, p) in enumerate(sup.children):
                     rc = sup.poll(p)
                     if rc is not None:
