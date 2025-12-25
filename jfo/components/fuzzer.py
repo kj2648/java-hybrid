@@ -55,6 +55,9 @@ class FuzzerRunner:
 
     def _apply_default_fuzzer_args(self, fuzzer_args: list[str]) -> list[str]:
         args = list(fuzzer_args)
+        if not self._has_flag(args, "-timeout"):
+            args.append("-timeout=25")
+
         # Jazzer exits the whole process on the first finding by default. Keep fuzzing so the
         # orchestrator can continue running without requiring libFuzzer `-fork`.
         if not self._has_flag(args, "--keep_going"):

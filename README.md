@@ -184,10 +184,10 @@ The SPF engine (`engines/spf_engine.py`) parses the Jazzer launcher to obtain cl
   - Default (corpus-sharing) mode:
     - `python3 -m jfo --work-dir work --mode default --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName>`
   - Notes:
-    - `cli` adds `--keep_going=0`, `--dedup=true`, `--reproducer_path=<work-dir>/reproducers`, `-verbosity=1`, `-reload=30`, and `-artifact_prefix=<work-dir>/artifacts/` unless you override them via `--`.
-    - `cli` also adds `-close_fd_mask=1` by default to suppress fuzz target stdout noise (override by passing `-close_fd_mask=...` via `--`).
-    - Findings are grouped by Jazzer `DEDUP_TOKEN` under `<work-dir>/findings/<token>/` (duplicates go to `<work-dir>/findings/<token>/dups/`).
-    - Grouping uses `DEDUP_TOKEN` plus the `Test unit written to .../crash-<sha1>` / `Base64:` lines in `logs/fuzz-*.log`.
+    - JFO adds `-reload=30`, `-timeout=25`, `--keep_going=0`, `--dedup=true`, `--reproducer_path=<work-dir>/reproducers` and `-artifact_prefix=<work-dir>/artifacts/` unless you override them via `--`.
+    - JFO also adds `-close_fd_mask=1` by default to suppress fuzz target stdout noise (override by passing `-close_fd_mask=...` via `--`).
+    - Findings are grouped by Jazzer `DEDUP_TOKEN` under `<work-dir>/findings/<token>/<sha1>/` with summaries in `<work-dir>/findings/overview.json` and `<work-dir>/findings/overview.md`.
+    - Grouping uses `DEDUP_TOKEN` plus the `Test unit written to .../crash-<sha1>` / `Base64:` lines in `logs/fuzz-*.log` (no crash re-run required).
     - `--mode atl` requires a ZMQ Dealer inside the fuzzer (OOFMutate). If no Dealer is detected, the run fails fast (otherwise seeds would just accumulate under `<work-dir>/zmq/seeds` with no ACK).
 
 ### ZMQ debugging tips
