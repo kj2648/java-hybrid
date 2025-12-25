@@ -43,9 +43,7 @@ class Pipeline:
     def run_all(self, opt: AllOptions) -> int:
         oss_launcher = opt.fuzzer_path
         harness = self.derive_harness_id(oss_launcher)
-        # Jazzer's JaCoCo-based coverage report/dump is not compatible with libFuzzer parallel
-        # modes (-jobs/-fork/-merge) and doesn't need ATL/ZMQ. Force a simple default-mode run.
-        self.cfg.mode = "default" if opt.coverage else (opt.mode or "default").lower()
+        self.cfg.mode = (opt.mode or "default").lower()
 
         if opt.coverage:
             return CoverageRunner(cfg=self.cfg).run(
@@ -104,12 +102,12 @@ class Pipeline:
                 sup.add("findings", p)
 
             # The watcher exists to enqueue corpus plateau seeds for DSE.
-            if (not opt.no_watcher) and (not opt.no_dse) and (not opt.coverage):
+            if (not opt.no_watcher) and (not opt.no_dse):
                 p = multiprocessing.Process(target=watcher_enqueue_seeds, args=(self.cfg,), name="watcher")
                 p.start()
                 sup.add("watcher", p)
 
-            if (not opt.no_dse) and (not opt.coverage):
+            if not opt.no_dse:
                 self._maybe_fail_fast_atl_dealer(harness=harness, sup=sup, opt=opt)
                 for wid in range(self.cfg.dse_workers):
                     cfg_child = Config(

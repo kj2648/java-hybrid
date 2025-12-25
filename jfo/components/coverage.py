@@ -11,6 +11,16 @@ from jfo.config import Config
 
 
 _RE_CP = re.compile(r"--cp=([^ \n]+)")
+_RE_TC = re.compile(r"--target_class=([^ \n]+)")
+
+# Avoid JaCoCo report failures due to duplicate Jazzer runtime classes.
+_JACOCO_EXCLUDE_JAR_SUBSTRINGS = (
+    "jazzer",
+    "jazzer_agent",
+    "jazzer_agent_deploy",
+    "jazzer_standalone",
+    "jazzer_bootstrap",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +54,8 @@ class CoverageRunner:
 
         print(
             f"[Coverage] work_dir={self.cfg.work_dir} harness={harness} "
-            f"report={outputs.report_txt} dump={outputs.exec_file} jacoco_html={outputs.html_dir}"
+            f"report={outputs.report_txt} dump={outputs.exec_file} jacoco_html={outputs.html_dir}",
+            flush=True,
         )
 
         proc = fuzzer_runner.run(
@@ -169,19 +180,89 @@ class CoverageRunner:
             out.append(p)
         return out
 
+    @staticmethod
+    def _parse_target_class_from_launcher(launcher: Path) -> str | None:
+        try:
+            txt = launcher.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return None
+        m = _RE_TC.search(txt)
+        if not m:
+            return None
+        tc = m.group(1).strip().strip('"').strip("'")
+        return tc or None
+
+    @staticmethod
+    def _target_class_file_relpath(target_class: str) -> Path:
+        # "pkg.Class" -> "pkg/Class.class", "Class" -> "Class.class"
+        return Path(*target_class.split(".")).with_suffix(".class")
+
+    @classmethod
+    def _looks_like_jazzer_jar(cls, p: Path) -> bool:
+        name = p.name.lower()
+        return any(s in name for s in _JACOCO_EXCLUDE_JAR_SUBSTRINGS)
+
+    def _select_classfiles_for_report(self, launcher: Path) -> list[Path]:
+        """
+        Select a safe set of classfiles for jacococli `report`:
+        - include non-Jazzer jars from the fuzz target classpath
+        - include the fuzz target .class file (if found) instead of scanning the whole out/ dir
+        This avoids JaCoCo errors like "Can't add different class with same name".
+        """
+        cp_entries = self._parse_classpath_from_launcher(launcher)
+        target_class = self._parse_target_class_from_launcher(launcher)
+
+        jars: list[Path] = []
+        dirs: list[Path] = []
+        for p in cp_entries:
+            try:
+                rp = p.expanduser().resolve()
+            except Exception:
+                rp = p
+            if rp.is_dir():
+                dirs.append(rp)
+            elif rp.is_file() and rp.suffix.lower() == ".jar":
+                if not self._looks_like_jazzer_jar(rp):
+                    jars.append(rp)
+
+        classfiles: list[Path] = []
+        classfiles.extend(jars)
+
+        if target_class:
+            rel = self._target_class_file_relpath(target_class)
+            for d in dirs:
+                cand = (d / rel)
+                if cand.is_file():
+                    classfiles.append(cand)
+                    break
+
+        # De-dup while preserving order.
+        seen: set[Path] = set()
+        uniq: list[Path] = []
+        for p in classfiles:
+            try:
+                key = p.resolve()
+            except Exception:
+                key = p
+            if key in seen:
+                continue
+            seen.add(key)
+            uniq.append(p)
+        return uniq
+
     def _generate_jacoco_html(self, *, jacococli: Path, launcher: Path, exec_path: Path, out_dir: Path, report_name: str) -> bool:
         if not exec_path.is_file():
             return False
-        classpath = [p for p in self._parse_classpath_from_launcher(launcher) if p.exists()]
-        if not classpath:
-            print(f"[Coverage] could not parse any existing --cp entries from {launcher}")
+        classfiles = [p for p in self._select_classfiles_for_report(launcher) if p.exists()]
+        if not classfiles:
+            print(f"[Coverage] could not select any classfiles for report from {launcher}")
             return False
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
         cmd: list[str] = ["java", "-jar", str(jacococli), "report", str(exec_path), "--html", str(out_dir), "--name", report_name]
-        for p in classpath:
+        for p in classfiles:
             cmd += ["--classfiles", str(p)]
         try:
             subprocess.run(cmd, check=False)
@@ -189,4 +270,3 @@ class CoverageRunner:
             print(f"[Coverage] failed to run jacococli: {e}")
             return False
         return (out_dir / "index.html").is_file()
-
