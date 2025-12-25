@@ -13,6 +13,8 @@ class App:
         p.add_argument("--work-dir", default="work", help="Work directory root (default: work)")
         p.add_argument("--fuzzer-path", required=True, help="Path to an OSS-Fuzz launcher (used for SPF + running the fuzzer)")
         p.add_argument("--mode", choices=["default", "atl"], default="default", help="Pipeline mode (default: default)")
+        p.add_argument("--coverage", action="store_true", help="Write Jazzer coverage report/dump under <work-dir>/coverage and exit")
+        p.add_argument("--coverage-runs", type=int, default=1, help="libFuzzer -runs for --coverage (default: 1)")
         p.add_argument("--bind", default=None, help=argparse.SUPPRESS)
         p.add_argument("--no-router", action="store_true", help=argparse.SUPPRESS)
         p.add_argument("--no-fuzzer", action="store_true", help=argparse.SUPPRESS)
@@ -43,6 +45,8 @@ class App:
             no_fuzzer=getattr(args, "no_fuzzer", False),
             no_watcher=getattr(args, "no_watcher", False),
             no_dse=getattr(args, "no_dse", False),
+            coverage=bool(getattr(args, "coverage", False)),
+            coverage_runs=int(getattr(args, "coverage_runs", 1) or 1),
             fuzzer_args=list(getattr(args, "fuzzer_args", [])),
         )
         return Pipeline(cfg=cfg, workdir=workdir).run_all(opt)

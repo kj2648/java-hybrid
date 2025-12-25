@@ -16,6 +16,18 @@ Core pipeline:
 python3 -m jfo --work-dir work --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName>
 ```
 
+## Coverage report
+
+Jazzer can write a JaCoCo-format coverage dump and a human-readable coverage report on exit.
+
+```bash
+# runs a short single-threaded replay/fuzz and writes:
+#   <work-dir>/coverage/<FuzzerName>.coverage.txt
+#   <work-dir>/coverage/<FuzzerName>.coverage.exec
+#   <work-dir>/coverage/<FuzzerName>.jacoco_html/   (auto-downloads jacococli.jar into third_party/)
+python3 -m jfo --work-dir work --fuzzer-path /path/to/oss-fuzz/build/out/<project>/<FuzzerName> --coverage
+```
+
 Help:
 
 ```bash

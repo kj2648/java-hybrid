@@ -5,6 +5,7 @@ from pathlib import Path
 
 from jfo.config import Config
 from jfo.components.atl_jazzer_launcher import AtlJazzerLauncherGenerator
+from jfo.components.coverage import CoverageRunner
 from jfo.components.dse_worker import dse_worker
 from jfo.components.fuzzer import FuzzerRunner
 from jfo.components.findings_deduper import run_findings_deduper
@@ -23,6 +24,8 @@ class AllOptions:
     no_fuzzer: bool
     no_watcher: bool
     no_dse: bool
+    coverage: bool
+    coverage_runs: int
     fuzzer_args: list[str]
 
 
@@ -40,7 +43,18 @@ class Pipeline:
     def run_all(self, opt: AllOptions) -> int:
         oss_launcher = opt.fuzzer_path
         harness = self.derive_harness_id(oss_launcher)
-        self.cfg.mode = (opt.mode or "default").lower()
+        # Jazzer's JaCoCo-based coverage report/dump is not compatible with libFuzzer parallel
+        # modes (-jobs/-fork/-merge) and doesn't need ATL/ZMQ. Force a simple default-mode run.
+        self.cfg.mode = "default" if opt.coverage else (opt.mode or "default").lower()
+
+        if opt.coverage:
+            return CoverageRunner(cfg=self.cfg).run(
+                harness=harness,
+                launcher=oss_launcher,
+                fuzzer_runner=self.fuzzer,
+                fuzzer_args=list(opt.fuzzer_args),
+                runs=int(opt.coverage_runs or 1),
+            )
 
         params = self.workdir.ensure_seed_router_params(bind=opt.bind, harness=harness)
         router_running = None
@@ -90,12 +104,12 @@ class Pipeline:
                 sup.add("findings", p)
 
             # The watcher exists to enqueue corpus plateau seeds for DSE.
-            if (not opt.no_watcher) and (not opt.no_dse):
+            if (not opt.no_watcher) and (not opt.no_dse) and (not opt.coverage):
                 p = multiprocessing.Process(target=watcher_enqueue_seeds, args=(self.cfg,), name="watcher")
                 p.start()
                 sup.add("watcher", p)
 
-            if not opt.no_dse:
+            if (not opt.no_dse) and (not opt.coverage):
                 self._maybe_fail_fast_atl_dealer(harness=harness, sup=sup, opt=opt)
                 for wid in range(self.cfg.dse_workers):
                     cfg_child = Config(

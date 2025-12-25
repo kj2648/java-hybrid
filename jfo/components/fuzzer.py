@@ -16,10 +16,17 @@ class FuzzerRunner:
             return []
         return xs[1:] if xs[0] == "--" else xs
 
-    def run(self, *, launcher: Path, fuzzer_args: list[str], log_path: Path) -> subprocess.Popen:
-        corpus = self.cfg.corpus_dir_resolved
+    def run(
+        self,
+        *,
+        launcher: Path,
+        fuzzer_args: list[str],
+        log_path: Path,
+        corpus_dirs: list[Path] | None = None,
+    ) -> subprocess.Popen:
+        corpus_dirs = corpus_dirs or [self.cfg.corpus_dir_resolved]
         merged = self._apply_default_fuzzer_args(fuzzer_args)
-        cmd = self._launcher_argv(launcher) + merged + [str(corpus)]
+        cmd = self._launcher_argv(launcher) + merged + [str(p) for p in corpus_dirs]
         log_path.parent.mkdir(parents=True, exist_ok=True)
         lf = open(log_path, "ab", buffering=0)
         env = self._build_env()
