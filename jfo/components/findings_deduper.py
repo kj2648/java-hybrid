@@ -461,18 +461,43 @@ def _handle_finding(
         if repro_src.is_file():
             _link_or_copy(repro_src, dest_dir / repro_src.name)
 
-    # Copy/link the libFuzzer artifact if present.
-    for prefix in ("crash", "timeout", "oom", "leak"):
-        cand = cfg.artifacts_dir / f"{prefix}-{sha1}"
-        if cand.is_file():
-            _link_or_copy(cand, dest_dir / cand.name)
-            break
-
     crash_info = _extract_crash_info(excerpt_lines) if excerpt_lines else None
-    now = time.time()
+
+    # Prefer the artifact file mtime as the crash timestamp (more meaningful than "when the deduper noticed it").
+    artifact_file: Path | None = None
+    artifact_ts: float | None = None
+    candidates: list[Path] = []
+    if crash_info and crash_info.artifact_path:
+        candidates.append(Path(crash_info.artifact_path))
+    for prefix in ("crash", "timeout", "oom", "leak"):
+        candidates.append(cfg.artifacts_dir / f"{prefix}-{sha1}")
+
+    for cand in candidates:
+        try:
+            # The log line may arrive slightly before the artifact file is flushed to disk.
+            deadline = time.time() + 1.0
+            while time.time() < deadline:
+                if cand.is_file():
+                    artifact_file = cand
+                    artifact_ts = cand.stat().st_mtime
+                    break
+                time.sleep(0.05)
+            if artifact_file is not None:
+                break
+        except Exception:
+            continue
+
+    # Copy/link the artifact file if present.
+    if artifact_file is not None and artifact_file.is_file():
+        try:
+            _link_or_copy(artifact_file, dest_dir / artifact_file.name)
+        except Exception:
+            pass
+
+    ts = float(artifact_ts) if artifact_ts is not None else time.time()
     finding = Finding(
-        ts=now,
-        time=_ts_iso(now),
+        ts=ts,
+        time=_ts_iso(ts),
         token=token_l,
         sha1=sha1,
         source_log=str(source_log),
@@ -494,8 +519,17 @@ def _handle_finding(
         else:
             # If an old record exists, fill in crash/excerpt fields opportunistically.
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            # Keep the latest observation time.
-            meta["time"] = finding.time
+            # Keep the earliest known crash time (stable even if the process restarts).
+            try:
+                prev_ts = meta.get("ts")
+                if isinstance(prev_ts, (int, float)):
+                    meta["ts"] = float(min(float(prev_ts), float(finding.ts)))
+                else:
+                    meta["ts"] = float(finding.ts)
+            except Exception:
+                meta["ts"] = float(finding.ts)
+            if meta.get("time") is None:
+                meta["time"] = _ts_iso(meta.get("ts"))
             if meta.get("excerpt_log") is None:
                 meta["excerpt_log"] = excerpt_name
             if meta.get("source_line") is None:
