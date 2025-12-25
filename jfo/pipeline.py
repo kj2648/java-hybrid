@@ -89,7 +89,8 @@ class Pipeline:
                 p.start()
                 sup.add("findings", p)
 
-            if not opt.no_watcher:
+            # The watcher exists to enqueue corpus plateau seeds for DSE.
+            if (not opt.no_watcher) and (not opt.no_dse):
                 p = multiprocessing.Process(target=watcher_enqueue_seeds, args=(self.cfg,), name="watcher")
                 p.start()
                 sup.add("watcher", p)
