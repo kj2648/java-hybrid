@@ -106,11 +106,21 @@ class _TailState:
     def __init__(self) -> None:
         self.offset = 0
         self.buf = ""
-        self.pending_token: str | None = None
-        self.pending_token_ts = 0.0
-        self.pending_sha1: str | None = None
-        self.pending_sha1_ts = 0.0
+        self.cur_token: str | None = None
+        self.cur_token_ts = 0.0
+        self.cur_sha1: str | None = None
+        self.cur_sha1_ts = 0.0
+        self.cur_seen_base64 = False
+        self.cur_source_line = ""
         self.recent_lines: deque[str] = deque(maxlen=1500)
+
+    def reset_current(self) -> None:
+        self.cur_token = None
+        self.cur_token_ts = 0.0
+        self.cur_sha1 = None
+        self.cur_sha1_ts = 0.0
+        self.cur_seen_base64 = False
+        self.cur_source_line = ""
 
 
 def _iter_target_logs(logs_dir: Path) -> list[Path]:
@@ -188,6 +198,115 @@ def _extract_excerpt(st: _TailState) -> list[str]:
             continue
 
     return kept
+
+
+def _maybe_emit_current(cfg: Config, *, st: _TailState, source_log: Path, source_line: str, seen_pairs: set[tuple[str, str]]) -> None:
+    if not st.cur_token or not st.cur_sha1:
+        return
+    key = (st.cur_token.lower(), st.cur_sha1.lower())
+    if key in seen_pairs:
+        st.reset_current()
+        return
+    seen_pairs.add(key)
+    excerpt_lines = _extract_excerpt(st)
+    _handle_finding(
+        cfg,
+        token=st.cur_token,
+        sha1=st.cur_sha1,
+        source_log=source_log,
+        source_line=(source_line or st.cur_source_line or "").strip(),
+        excerpt_lines=excerpt_lines,
+    )
+    st.reset_current()
+
+
+def _extract_sha1_from_test_unit(line: str) -> str | None:
+    m_tu = _RE_TEST_UNIT.search(line)
+    if not m_tu:
+        return None
+    m_sha1 = _RE_ARTIFACT_SHA1.search(m_tu.group(1))
+    if not m_sha1:
+        return None
+    return m_sha1.group(1).lower()
+
+
+def _process_line(
+    cfg: Config, *, st: _TailState, line: str, source_log: Path, seen_pairs: set[tuple[str, str]]
+) -> None:
+    now = time.time()
+
+    # A new Java exception marks the start of the next crash block. Flush the previous
+    # crash before appending this line so the excerpt doesn't "jump" to the new exception.
+    if _RE_JAVA_EXCEPTION.match(line):
+        if st.cur_token and st.cur_sha1:
+            _maybe_emit_current(cfg, st=st, source_log=source_log, source_line=st.cur_source_line, seen_pairs=seen_pairs)
+
+    st.recent_lines.append(line)
+
+    # Track the current crash token.
+    m = _RE_DEDUP_TOKEN.search(line)
+    if m:
+        token = m.group(1).lower()
+        # De-dupe duplicate token lines printed to multiple streams.
+        if st.cur_token == token and (now - st.cur_token_ts) < 1.0:
+            pass
+        else:
+            # If we somehow see a new token while still holding a completed crash, emit first.
+            if st.cur_token and st.cur_sha1 and st.cur_token != token:
+                _maybe_emit_current(cfg, st=st, source_log=source_log, source_line=st.cur_source_line, seen_pairs=seen_pairs)
+            st.cur_token = token
+            st.cur_token_ts = now
+            st.cur_source_line = line
+            st.cur_seen_base64 = False
+            st.cur_sha1 = None
+            st.cur_sha1_ts = 0.0
+
+    # Prefer SHA-1 from the artifact path (it also lets excerpts capture "Test unit written...").
+    sha1_tu = _extract_sha1_from_test_unit(line)
+    if sha1_tu and st.cur_token:
+        st.cur_sha1 = sha1_tu
+        st.cur_sha1_ts = now
+        st.cur_source_line = line
+
+    # Use Base64 only as a fallback to derive the SHA-1 when no artifact line exists.
+    m_b64 = _RE_BASE64.match(line)
+    if m_b64 and st.cur_token:
+        st.cur_seen_base64 = True
+        st.cur_source_line = line
+        if not st.cur_sha1:
+            sha1_b64 = _compute_sha1_from_base64(m_b64.group(1))
+            if sha1_b64:
+                st.cur_sha1 = sha1_b64.lower()
+                st.cur_sha1_ts = now
+        if st.cur_sha1:
+            _maybe_emit_current(cfg, st=st, source_log=source_log, source_line=line, seen_pairs=seen_pairs)
+
+    # If we have a token+sha1 but never see Base64, flush after a short idle period.
+    if st.cur_token and st.cur_sha1 and (now - st.cur_sha1_ts) > 5.0:
+        _maybe_emit_current(cfg, st=st, source_log=source_log, source_line=st.cur_source_line, seen_pairs=seen_pairs)
+
+
+def rebuild_findings_once(cfg: Config) -> None:
+    """
+    One-shot rebuild of <work-dir>/findings by scanning existing logs.
+
+    This does not rerun the fuzzer; it only parses <work-dir>/logs.
+    """
+    logs_dir = cfg.logs_dir
+    _safe_mkdir(logs_dir)
+    _safe_mkdir(cfg.reproducers_dir)
+    _safe_mkdir(cfg.findings_dir)
+
+    seen_pairs: set[tuple[str, str]] = set()
+    for path in _iter_target_logs(logs_dir):
+        st = _TailState()
+        try:
+            for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                _process_line(cfg, st=st, line=raw, source_log=path, seen_pairs=seen_pairs)
+        except Exception:
+            continue
+        # Flush any trailing crash at EOF.
+        _maybe_emit_current(cfg, st=st, source_log=path, source_line=st.cur_source_line, seen_pairs=seen_pairs)
 
 
 def _handle_finding(
@@ -283,8 +402,8 @@ def run_findings_deduper(cfg: Config) -> None:
     Watches <work-dir>/logs for Jazzer findings and groups them by DEDUP_TOKEN.
 
     For each finding it tries to derive the input SHA-1 either from:
-      - `Base64: ...` output (preferred), or
-      - `Test unit written to .../<kind>-<sha1>` output (fallback).
+      - `Test unit written to .../<kind>-<sha1>` output (preferred), or
+      - `Base64: ...` output (fallback; only when no artifact line exists).
 
     Reproducers and artifacts are hardlinked (or copied) into:
       <work-dir>/findings/<dedup_token>/          (primary)
@@ -327,50 +446,6 @@ def run_findings_deduper(cfg: Config) -> None:
             lines = st.buf.split("\n")
             st.buf = lines[-1]
             for line in lines[:-1]:
-                st.recent_lines.append(line)
-                now = time.time()
-                token = None
-                m = _RE_DEDUP_TOKEN.search(line)
-                if m:
-                    token = m.group(1).lower()
-                    # De-dupe the duplicate DEDUP_TOKEN lines printed to stdout+stderr.
-                    if st.pending_token == token and (now - st.pending_token_ts) < 1.0:
-                        token = None
-                    else:
-                        st.pending_token = token
-                        st.pending_token_ts = now
-
-                sha1 = None
-                m_b64 = _RE_BASE64.match(line)
-                if m_b64:
-                    sha1 = _compute_sha1_from_base64(m_b64.group(1))
-                else:
-                    m_tu = _RE_TEST_UNIT.search(line)
-                    if m_tu:
-                        m_sha1 = _RE_ARTIFACT_SHA1.search(m_tu.group(1))
-                        if m_sha1:
-                            sha1 = m_sha1.group(1).lower()
-
-                if sha1:
-                    st.pending_sha1 = sha1.lower()
-                    st.pending_sha1_ts = now
-
-                # Pair token and sha1 in either order within a small window.
-                if st.pending_token and st.pending_sha1:
-                    if (now - st.pending_token_ts) < 15.0 and (now - st.pending_sha1_ts) < 15.0:
-                        key = (st.pending_token, st.pending_sha1)
-                        if key not in seen_pairs:
-                            seen_pairs.add(key)
-                            excerpt_lines = _extract_excerpt(st)
-                            _handle_finding(
-                                cfg,
-                                token=st.pending_token,
-                                sha1=st.pending_sha1,
-                                source_log=path,
-                                source_line=line,
-                                excerpt_lines=excerpt_lines,
-                            )
-                        st.pending_token = None
-                        st.pending_sha1 = None
+                _process_line(cfg, st=st, line=line, source_log=path, seen_pairs=seen_pairs)
 
         time.sleep(0.25)
