@@ -1,6 +1,8 @@
 import base64
+from collections import deque
 import hashlib
 import json
+import os
 import re
 import shutil
 import time
@@ -15,6 +17,18 @@ _RE_BASE64 = re.compile(r"^\s*Base64:\s*([A-Za-z0-9+/=]+)\s*$")
 _RE_TEST_UNIT = re.compile(r"\bTest unit written to\s+(\S+)\s*$")
 _RE_ARTIFACT_SHA1 = re.compile(r"(?:^|/)(?:crash|timeout|oom|leak)-([0-9a-fA-F]{40})(?:\s|$)")
 _RE_ARTIFACT_NAME = re.compile(r"^(?:crash|timeout|oom|leak)-([0-9a-fA-F]{40})$")
+_RE_JAVA_EXCEPTION = re.compile(r"^\s*==\s*Java Exception:\s*(.*)\s*$")
+_RE_STACK_LINE = re.compile(r"^\s*(?:at\s+|\tat\s+).+")
+_RE_CAUSED_BY = re.compile(r"^\s*Caused by:\s+.*")
+
+
+@dataclass(frozen=True, slots=True)
+class CrashInfo:
+    exception: str | None
+    stacktrace: list[str]
+    artifact_path: str | None
+    artifact_kind: str | None
+    base64: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +38,8 @@ class Finding:
     sha1: str
     source_log: str
     source_line: str
+    crash: CrashInfo | None
+    excerpt_log: str | None
 
 
 def _safe_mkdir(p: Path) -> None:
@@ -53,6 +69,39 @@ def _compute_sha1_from_base64(b64: str) -> str | None:
     return hashlib.sha1(raw).hexdigest()
 
 
+def _extract_crash_info(lines: list[str]) -> CrashInfo:
+    exc: str | None = None
+    stack: list[str] = []
+    artifact_path: str | None = None
+    artifact_kind: str | None = None
+    b64: str | None = None
+
+    for line in lines:
+        if exc is None:
+            m = _RE_JAVA_EXCEPTION.match(line)
+            if m:
+                exc = m.group(1).strip() or None
+        if _RE_STACK_LINE.match(line) or _RE_CAUSED_BY.match(line):
+            stack.append(line.rstrip())
+        m_tu = _RE_TEST_UNIT.search(line)
+        if m_tu:
+            artifact_path = m_tu.group(1)
+            m_kind = re.search(r"(?:^|/)(crash|timeout|oom|leak)-[0-9a-fA-F]{40}", artifact_path)
+            if m_kind:
+                artifact_kind = m_kind.group(1).lower()
+        m_b64 = _RE_BASE64.match(line)
+        if m_b64:
+            b64 = m_b64.group(1)
+
+    return CrashInfo(
+        exception=exc,
+        stacktrace=stack,
+        artifact_path=artifact_path,
+        artifact_kind=artifact_kind,
+        base64=b64,
+    )
+
+
 class _TailState:
     def __init__(self) -> None:
         self.offset = 0
@@ -61,6 +110,7 @@ class _TailState:
         self.pending_token_ts = 0.0
         self.pending_sha1: str | None = None
         self.pending_sha1_ts = 0.0
+        self.recent_lines: deque[str] = deque(maxlen=1500)
 
 
 def _iter_target_logs(logs_dir: Path) -> list[Path]:
@@ -88,7 +138,61 @@ def _reproducer_sources(cfg: Config, sha1: str) -> list[Path]:
     ]
 
 
-def _handle_finding(cfg: Config, *, token: str, sha1: str, source_log: Path, source_line: str) -> None:
+def _extract_excerpt(st: _TailState) -> list[str]:
+    """
+    Best-effort crash excerpt from the recent log tail.
+    """
+    lines = list(st.recent_lines)
+    if not lines:
+        return []
+    end = len(lines)
+    start = max(0, end - 400)
+
+    # Try to start at the most recent "== Java Exception:" marker.
+    for i in range(end - 1, -1, -1):
+        if _RE_JAVA_EXCEPTION.match(lines[i]):
+            start = i
+            break
+
+    # Keep the excerpt bounded even if the exception is very old.
+    if end - start > 800:
+        start = end - 800
+
+    excerpt = lines[start:end]
+
+    # Try to end at the last "Test unit written to ..." or "Base64:" line.
+    last_signal = -1
+    for i, line in enumerate(excerpt):
+        if _RE_TEST_UNIT.search(line) or _RE_BASE64.match(line):
+            last_signal = i
+    if last_signal != -1:
+        excerpt = excerpt[: last_signal + 1]
+
+    # Strip libFuzzer noise (e.g. MS/hexdump) while keeping the crash essence.
+    kept: list[str] = []
+    for line in excerpt:
+        if _RE_JAVA_EXCEPTION.match(line):
+            kept.append(line.rstrip())
+            continue
+        if _RE_STACK_LINE.match(line) or _RE_CAUSED_BY.match(line):
+            kept.append(line.rstrip())
+            continue
+        if _RE_DEDUP_TOKEN.search(line):
+            kept.append(line.rstrip())
+            continue
+        if line.strip() == "== libFuzzer crashing input ==":
+            kept.append(line.rstrip())
+            continue
+        if _RE_TEST_UNIT.search(line) or _RE_BASE64.match(line):
+            kept.append(line.rstrip())
+            continue
+
+    return kept
+
+
+def _handle_finding(
+    cfg: Config, *, token: str, sha1: str, source_log: Path, source_line: str, excerpt_lines: list[str]
+) -> None:
     _safe_mkdir(cfg.findings_dir)
     index_path = cfg.findings_dir / "index.jsonl"
     state_path = cfg.findings_dir / "state.json"
@@ -116,6 +220,13 @@ def _handle_finding(cfg: Config, *, token: str, sha1: str, source_log: Path, sou
     meta_path = dest_dir / "finding.json"
     meta_exists = meta_path.exists()
 
+    excerpt_name = "finding.log"
+    excerpt_path = dest_dir / excerpt_name
+    try:
+        excerpt_path.write_text("\n".join(excerpt_lines).rstrip() + "\n", encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
     # Copy/link the Java reproducer if present.
     for repro_src in _reproducer_sources(cfg, sha1):
         if repro_src.is_file():
@@ -127,13 +238,28 @@ def _handle_finding(cfg: Config, *, token: str, sha1: str, source_log: Path, sou
         if cand.is_file():
             _link_or_copy(cand, dest_dir / cand.name)
             break
-    if source_log.is_file():
-        _link_or_copy(source_log, dest_dir / source_log.name)
 
-    finding = Finding(ts=time.time(), token=token_l, sha1=sha1, source_log=str(source_log), source_line=source_line.strip())
+    crash_info = _extract_crash_info(excerpt_lines) if excerpt_lines else None
+    finding = Finding(
+        ts=time.time(),
+        token=token_l,
+        sha1=sha1,
+        source_log=str(source_log),
+        source_line=source_line.strip(),
+        crash=crash_info,
+        excerpt_log=excerpt_name,
+    )
     try:
         if not meta_exists:
             meta_path.write_text(json.dumps(asdict(finding), ensure_ascii=False, indent=2), encoding="utf-8")
+        else:
+            # If an old record exists, fill in crash/excerpt fields opportunistically.
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if meta.get("excerpt_log") is None:
+                meta["excerpt_log"] = excerpt_name
+            if meta.get("crash") is None and crash_info is not None:
+                meta["crash"] = asdict(crash_info)
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
     try:
@@ -201,6 +327,7 @@ def run_findings_deduper(cfg: Config) -> None:
             lines = st.buf.split("\n")
             st.buf = lines[-1]
             for line in lines[:-1]:
+                st.recent_lines.append(line)
                 now = time.time()
                 token = None
                 m = _RE_DEDUP_TOKEN.search(line)
@@ -234,12 +361,14 @@ def run_findings_deduper(cfg: Config) -> None:
                         key = (st.pending_token, st.pending_sha1)
                         if key not in seen_pairs:
                             seen_pairs.add(key)
+                            excerpt_lines = _extract_excerpt(st)
                             _handle_finding(
                                 cfg,
                                 token=st.pending_token,
                                 sha1=st.pending_sha1,
                                 source_log=path,
                                 source_line=line,
+                                excerpt_lines=excerpt_lines,
                             )
                         st.pending_token = None
                         st.pending_sha1 = None
